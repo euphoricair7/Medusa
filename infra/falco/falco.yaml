@@ -1,0 +1,24 @@
+# Falco config — RAFT v1
+# Manda tutti gli alert all'API via HTTP webhook
+
+engine:
+  kind: ebpf
+
+# Webhook verso FastAPI
+http_output:
+  enabled: true
+  url: http://api:8000/alerts/falco
+
+stdout_output:
+  enabled: true
+
+json_output: true
+json_include_output_property: true
+json_include_tags_property: true
+
+priority: debug
+
+rules_file:
+  - /etc/falco/falco_rules.yaml
+  - /etc/falco/falco_rules.local.yaml
+  - /etc/falco/rules.d/medusa_rules.yaml

@@ -1,0 +1,51 @@
+# medusa custom rules v1
+# These rules cover the TTPs generated in the vulnerable target host
+
+# DUMMY rules for testing the env
+
+- list: medusa_sensitive_files
+  items:
+    - /etc/shadow
+    - /etc/passwd
+    - /root/.ssh/id_rsa
+    - /root/.bash_history
+    - /proc/1/environ
+
+- rule: medusa Shell Spawned in Container
+  desc: Una shell è stata aperta dentro un container — possibile RCE
+  condition: >
+    spawned_process
+    and container
+    and proc.name in (shell_binaries)
+  output: >
+    Shell aperta nel container
+    (user=%user.name shell=%proc.name parent=%proc.pname
+     cmdline=%proc.cmdline container=%container.name
+     image=%container.image.repository)
+  priority: CRITICAL
+  tags: [medusa, T1059, execution]
+
+- rule: medusa Sensitive File Read
+  desc: Lettura di file sensibili di sistema
+  condition: >
+    open_read
+    and container
+    and fd.name in (medusa_sensitive_files)
+  output: >
+    File sensibile aperto in lettura
+    (user=%user.name file=%fd.name proc=%proc.name
+     container=%container.name image=%container.image.repository)
+  priority: ERROR
+  tags: [medusa, T1005, collection]
+
+- rule: medusa SSH Brute Force
+  desc: Tentativi multipli di autenticazione SSH fallita
+  condition: >
+    evt.type = accept
+    and fd.sport = 22
+    and container
+  output: >
+    Connessione SSH sul target
+    (src=%fd.sip container=%container.name)
+  priority: WARNING
+  tags: [medusa, T1110, credential-access]

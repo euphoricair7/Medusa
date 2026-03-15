@@ -1,0 +1,91 @@
+name: medusa-v1
+
+services:
+
+  # Target — vulnerable
+  target:
+    build:
+      context: ./services/target
+    container_name: medusa-target
+    hostname: target
+    networks:
+      - lab-net
+    ports:
+      - "8080:8080"
+      - "2222:22"
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    restart: unless-stopped
+
+  # Falco — monitoring syscall on the target
+  falco:
+    image: falcosecurity/falco:0.39.2
+    container_name: medusa-falco
+    hostname: falco
+    privileged: true
+    pid: "container:medusa-target"
+    command: falco -o engine.kind=modern_ebpf
+    networks:
+      - lab-net
+      - internal-net
+    volumes:
+      - /sys/kernel/tracing:/sys/kernel/tracing:ro
+      - /proc:/host/proc:ro
+      - /etc:/host/etc:ro
+      - ./infra/falco/falco.yaml:/etc/falco/falco.yaml:ro
+      - ./infra/falco/rules:/etc/falco/rules.d:ro
+    depends_on:
+      - target
+      - api
+    restart: unless-stopped
+
+  # API — FastAPI gets the Falco alerts and it saves them on postgres
+  api:
+    build:
+      context: ./services/api
+    container_name: medusa-api
+    hostname: api
+    networks:
+      - internal-net
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://medusa:${POSTGRES_PASSWORD:-medusa}@postgres:5432/medusa
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: medusa-postgres
+    hostname: postgres
+    networks:
+      - internal-net
+    environment:
+      - POSTGRES_USER=medusa
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-medusa}
+      - POSTGRES_DB=medusa
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medusa -d medusa"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+networks:
+  lab-net:
+    name: medusa-lab-net
+    driver: bridge
+  internal-net:
+    name: medusa-internal-net
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres-data:
