@@ -21,19 +21,24 @@ services:
 
   # Falco — monitoring syscall on the target
   falco:
-    image: falcosecurity/falco:0.39.2
+    image: falcosecurity/falco:latest
     container_name: medusa-falco
     hostname: falco
     privileged: true
-    pid: "container:medusa-target"
+    pid: host
+    security_opt:
+      - seccomp:unconfined  # allows eBPF syscalls
+      - label:disable       # Fedora/SELinux — ignored on Ubuntu
     command: falco -o engine.kind=modern_ebpf
     networks:
       - lab-net
       - internal-net
     volumes:
-      - /sys/kernel/tracing:/sys/kernel/tracing:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host/proc:ro
       - /etc:/host/etc:ro
+      - /sys/kernel/btf/vmlinux:/sys/kernel/btf/vmlinux:ro
+      - /sys/kernel/tracing:/sys/kernel/tracing:ro
       - ./infra/falco/falco.yaml:/etc/falco/falco.yaml:ro
       - ./infra/falco/rules:/etc/falco/rules.d:ro
     depends_on:

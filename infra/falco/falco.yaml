@@ -19,6 +19,6 @@ json_include_tags_property: true
 priority: debug
 
 rules_file:
-  - /etc/falco/falco_rules.yaml
-  - /etc/falco/falco_rules.local.yaml
+  #- /etc/falco/falco_rules.yaml       # requires container plugin >= 0.4.0 (not in plain image)
+  #- /etc/falco/falco_rules.local.yaml # may not exist — keep commented
   - /etc/falco/rules.d/medusa_rules.yaml

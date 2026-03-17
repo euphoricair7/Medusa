@@ -1,7 +1,8 @@
 # medusa custom rules v1
 # These rules cover the TTPs generated in the vulnerable target host
-
-# DUMMY rules for testing the env
+# NOTE: falco_rules.yaml NOT loaded (requires container plugin >= 0.4.0, not in plain image).
+#       All container.* fields are plugin-owned and unavailable without it.
+#       Rules use raw evt.type conditions instead of high-level macros.
 
 - list: medusa_sensitive_files
   items:
@@ -14,27 +15,22 @@
 - rule: medusa Shell Spawned in Container
   desc: Una shell è stata aperta dentro un container — possibile RCE
   condition: >
-    spawned_process
-    and container
-    and proc.name in (shell_binaries)
+    evt.type = execve
+    and proc.name in (bash, sh, zsh, dash)
   output: >
     Shell aperta nel container
-    (user=%user.name shell=%proc.name parent=%proc.pname
-     cmdline=%proc.cmdline container=%container.name
-     image=%container.image.repository)
+    (user=%user.name proc=%proc.name parent=%proc.pname cmd=%proc.cmdline)
   priority: CRITICAL
   tags: [medusa, T1059, execution]
 
 - rule: medusa Sensitive File Read
   desc: Lettura di file sensibili di sistema
   condition: >
-    open_read
-    and container
+    evt.type in (open, openat)
     and fd.name in (medusa_sensitive_files)
   output: >
     File sensibile aperto in lettura
-    (user=%user.name file=%fd.name proc=%proc.name
-     container=%container.name image=%container.image.repository)
+    (user=%user.name file=%fd.name proc=%proc.name cmd=%proc.cmdline)
   priority: ERROR
   tags: [medusa, T1005, collection]
 
@@ -43,9 +39,7 @@
   condition: >
     evt.type = accept
     and fd.sport = 22
-    and container
   output: >
-    Connessione SSH sul target
-    (src=%fd.sip container=%container.name)
+    Connessione SSH sul target (src=%fd.sip proc=%proc.name)
   priority: WARNING
   tags: [medusa, T1110, credential-access]
