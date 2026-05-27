@@ -1,5 +1,7 @@
 -- Medusa v1 schema alerts and snapshots
 
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 CREATE TABLE alerts (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     received_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),

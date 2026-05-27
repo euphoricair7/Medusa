@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from db.session import engine, Base
-from routers import alerts
+from routers import alerts,forensic
+
 
 
 @asynccontextmanager
@@ -28,8 +29,11 @@ app.add_middleware(
 )
 
 app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
+app.include_router(forensic.router, prefix="/forensic", tags=["forensic"])
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "medusa-api-v1"}
+
+

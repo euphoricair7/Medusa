@@ -43,3 +43,16 @@
     Connessione SSH sul target (src=%fd.sip proc=%proc.name)
   priority: WARNING
   tags: [medusa, T1110, credential-access]
+
+# - rule: Outbound Connection From Container to Unexpected IP
+#   desc: Detects outbound network connections from a container to an unexpected/blacklisted IP address.
+#   condition: >
+#     evt.type in (connect, sendto, sendmsg) and
+#       not fd.net in (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and
+#       not fd.sip in (127.0.0.1, ::1)
+#   output: >
+#       Unexpected outbound connection from container to non-standard IP (%fd.sip). 
+#       Process: (%proc.name).
+#   priority: WARNING
+#   tags: [network, container, security]
+    
