@@ -4,4 +4,3 @@ sqlalchemy[asyncio]==2.0.48
 asyncpg==0.31.0
 pydantic==2.12.5
 pydantic-settings==2.13.1
-httpx

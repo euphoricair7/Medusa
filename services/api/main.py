@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from db.session import engine, Base
+from db.session import engine, Base, SessionLocal
 from routers import alerts,forensic
 
 
@@ -10,8 +10,10 @@ from routers import alerts,forensic
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
+        # await conn.run_sync(Base.metadata.drop_all) # drop all tables
         await conn.run_sync(Base.metadata.create_all)
     yield
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -21,6 +23,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Dependency to get a DB session
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,7 +36,7 @@ app.add_middleware(
 )
 
 app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
-app.include_router(forensic.router, prefix="/forensic", tags=["forensic"])
+app.include_router(forensic.router, prefix="/forensic-checkpoint", tags=["forensic"])
 
 
 @app.get("/health")

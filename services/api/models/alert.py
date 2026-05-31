@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Text, ARRAY, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 from typing import Optional
 import uuid
@@ -38,7 +38,7 @@ class AlertFalcoInput(BaseModel):
 class AlertOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id:             uuid.UUID
+    alert_id: uuid.UUID = Field(alias="id")
     received_at:    datetime
     rule:           str
     priority:       str

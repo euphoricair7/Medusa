@@ -14,6 +14,23 @@ CREATE TABLE alerts (
     raw_event      JSONB NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS forensic_events(
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ,
+    alert_id       UUID REFERENCES alerts(id),
+    pod_name       TEXT,
+    namespace      TEXT,
+    container_name TEXT,
+    phase          TEXT NOT NULL DEFAULT 'pending',
+    trigger_source TEXT,
+    triggered_rule TEXT,
+    triggered_priority TEXT,
+    checkpoint_location TEXT,
+    raw_alert      JSONB,
+    raw_report     JSONB
+);
+
 CREATE INDEX idx_alerts_received_at ON alerts (received_at DESC);
 CREATE INDEX idx_alerts_priority    ON alerts (priority);
 CREATE INDEX idx_alerts_container   ON alerts (container_name);

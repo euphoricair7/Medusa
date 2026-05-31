@@ -1,52 +1,56 @@
-from fastapi import APIRouter, Request
-import httpx
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from models.alert import Alert, AlertOut
+from db.session import get_db
+from datetime import datetime
+import uuid
 
 router = APIRouter()
 
-@router.get("/")
-async def get_alerts():
-    return []
+@router.get("/", response_model=list[AlertOut])
+async def get_alerts(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Alert))
+    alerts = result.scalars().all()
+    return alerts
 
 @router.post("/falco")
-async def create_falco_alert(alert: dict, request: Request):
+async def create_falco_alert(alert: dict, db: AsyncSession = Depends(get_db)):
+    # storing in the db
+    new_alert = Alert(
+        received_at=datetime.utcnow(),
+        rule=alert.get("rule", ""),
+        priority=alert.get("priority", ""),
+        output=alert.get("output", ""),
+        container_name=alert.get("output_fields", {}).get("container.name"),
+        image=alert.get("output_fields", {}).get("container.image.repository"),
+        tags=alert.get("tags"),
+        raw_event=alert
+    )
+    db.add(new_alert)
+    print("committing")
+    await db.commit()
+    print("committed")
+    await db.refresh(new_alert)
+
     print(f"Received Falco alert: {alert}")
-
-    # Forward to forensic checkpointing if priority is high enough
-    priority = alert.get("priority", "debug").lower()
-    if priority in ["critical", "error", "warning"]:
-        
-        # The request to the forensic endpoint needs container_name, pod_name, and namespace.
-        # Falco's output_fields should have this, but let's make sure.
-        # For now, I'll extract what I can from the alert.
-        output_fields = alert.get("output_fields", {})
-        container_name = output_fields.get("k8s.pod.container.name") or output_fields.get("container.name")
-        pod_name = output_fields.get("k8s.pod.name")
-        namespace = output_fields.get("k8s.ns.name")
-
-        # This is a simplification. In a real scenario, you'd have a more robust
-        # way to get these details if they are not in the alert.
-        if container_name and pod_name and namespace:
-            forensic_request_body = {
-                "rule": alert.get("rule"),
-                "priority": alert.get("priority"),
-                "output": alert.get("output"),
-                "output_fields": output_fields,
-                "tags": alert.get("tags"),
-                "container_name": container_name,
-                "pod_name": pod_name,
-                "namespace": namespace,
-            }
-
-            forensic_url = request.url_for("create_falco_alert").replace("/alerts/falco", "/forensic/forensic-checkpoint")
-            async with httpx.AsyncClient() as client:
-                try:
-                    response = await client.post(forensic_url, json=forensic_request_body)
-                    response.raise_for_status()
-                    print(f"Forwarded to forensic checkpointing, status: {response.status_code}")
-                except httpx.RequestError as e:
-                    print(f"Error forwarding to forensic checkpointing: {e}")
-        else:
-            print("Could not forward to forensic checkpointing: missing container/pod/namespace info.")
-
-
+    
     return {"status": "ok"}
+
+@router.put("/{alert_id}", response_model=AlertOut)
+async def update_alert(alert_id: uuid.UUID, alert_update: AlertOut, db: AsyncSession = Depends(get_db)):
+    query = select(Alert).where(Alert.id == alert_id)
+    result = await db.execute(query)
+    stored_alert = result.scalars().first()
+
+    if not stored_alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    update_data = alert_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(stored_alert, key, value)
+
+    db.add(stored_alert)
+    await db.commit()
+    await db.refresh(stored_alert)
+    return stored_alert
