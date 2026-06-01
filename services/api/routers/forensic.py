@@ -8,7 +8,7 @@ from models.forensic import (
     ForensicCheckpointResponse,
 )
 from models.alert import Alert
-from db.session import get_db, SessionLocal as AsyncSessionLocal
+from db.session import SessionLocal as AsyncSessionLocal
 import uuid
 from fastapi import HTTPException
 
@@ -103,7 +103,7 @@ async def create_manual_alert(request: ForensicCheckpointManualRequest):
         if request.alert_id:
             result = await session.execute(
                 select(Alert)
-                .where(Alert.alert_id==request.alert_id)
+                .where(Alert.id==request.alert_id)
             )
             if not result.scalars().first():
                 raise HTTPException(status_code=404, detail=f"No alert found with alert_id: {request.alert_id}")
