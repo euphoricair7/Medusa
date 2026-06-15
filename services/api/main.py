@@ -17,8 +17,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Medusa API v1",
-    description="Container Forensics Framework — riceve alert da Falco",
+    title="Medusa API",
+    description=(
+        "REST API for the Medusa container forensics framework. "
+        "Receives Falco runtime alerts, persists them to PostgreSQL, "
+        "and manages forensic checkpoint events triggered automatically or manually."
+    ),
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -39,7 +43,13 @@ app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 app.include_router(forensic.router, prefix="/forensic-checkpoint", tags=["forensic"])
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    summary="Service health check",
+    description="Returns the current health status of the Medusa API service.",
+    response_description="Health status payload with service identifier.",
+    tags=["health"],
+)
 async def health():
     return {"status": "ok", "service": "medusa-api-v1"}
 

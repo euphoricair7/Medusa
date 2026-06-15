@@ -28,21 +28,24 @@ class Alert(Base):
 
 class AlertFalcoInput(BaseModel):
     """Schema of the payload thant Falco sends directly via http_output."""
-    rule:     str
-    priority: str
-    output:   str
-    output_fields: Optional[dict] = None
-    tags:     Optional[list[str]] = None
+    rule:     str = Field(description="The Falco rule that triggered this alert")
+    priority: str = Field(description="The priority of the alert")
+    output:   str = Field(description="The output message of the alert")
+    output_fields: Optional[dict] = Field(default=None, description="The output_fields dictionary from the Falco alert, which may contain additional structured information")
+    tags:     Optional[list[str]] = Field(default=None, description="The list of tags associated with the triggered rule in Falco")
 
 
 class AlertOut(BaseModel):
+    """
+    Standardized response returning the details of a persisted Falco alert.
+    """
     model_config = ConfigDict(from_attributes=True)
 
-    alert_id: uuid.UUID = Field(alias="id")
-    received_at:    datetime
-    rule:           str
-    priority:       str
-    output:         str
-    container_name: Optional[str]
-    image:          Optional[str]
-    tags:           Optional[list[str]]
+    alert_id: uuid.UUID = Field(alias="id",description="The unique identifier of the alert")
+    received_at:    datetime = Field(description="The timestamp when the alert was received")
+    rule:           str = Field(description="The Falco rule that triggered this alert")
+    priority:       str = Field(description="The priority of the alert")
+    output:         str = Field(description="The output message of the alert")
+    container_name: Optional[str] = Field(default=None, description="The name of the container where the alert was triggered")
+    image:          Optional[str] = Field(default=None, description="The image of the container where the alert was triggered")
+    tags:           Optional[list[str]] = Field(default=None, description="The list of tags associated with the triggered rule in Falco")

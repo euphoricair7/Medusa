@@ -17,13 +17,22 @@ router = APIRouter()
 ALERT_PRIORITY = ["critical", "error", "warning", "notice", "info", "debug"]
 MIN_PRIORITY = "warning"  # Only process alerts with priority "warning" or higher
 
-@router.post("/falco_alert", response_model=ForensicCheckpointResponse)
+@router.post(
+    "/falco_alert",
+    response_model=ForensicCheckpointResponse,
+    summary="Create forensic event from Falco alert",
+    description=(
+        "Automatic flow triggered by a Falco webhook. Validates alert priority, "
+        "creates a forensic event in `pending` phase, and optionally links to an "
+        "existing alert via `alert_id`. Kubernetes context is not yet populated."
+    ),
+    response_description="The newly created forensic checkpoint event.",
+    responses={
+        422: {"description": "Alert priority is below the configured threshold."},
+        500: {"description": "Failed to persist the forensic event."},
+    },
+)
 async def create_falco_alert(alert: ForensicCheckpointAlertRequest):
-    
-    """
-    Automatic flow: called by Falco webhook.
-    No k8s context yet. Initial checkpoint status right now as: pending
-    """
 
     #filtering alerts based on priority
 
@@ -87,13 +96,23 @@ async def create_falco_alert(alert: ForensicCheckpointAlertRequest):
 
     
 
-@router.post("/manual_alert", response_model=ForensicCheckpointResponse)
+@router.post(
+    "/manual_alert",
+    response_model=ForensicCheckpointResponse,
+    summary="Manually trigger a forensic checkpoint",
+    description=(
+        "Analyst-initiated flow with explicit Kubernetes context "
+        "(`pod_name`, `namespace`, `container_name`). Creates a forensic event "
+        "in `pending` phase and optionally links to an existing alert via `alert_id`."
+    ),
+    response_description="The newly created forensic checkpoint event.",
+    responses={
+        404: {"description": "Referenced alert_id does not exist."},
+        500: {"description": "Failed to persist the forensic event."},
+    },
+)
 async def create_manual_alert(request: ForensicCheckpointManualRequest):
     print("MANUAL ROUTE HIT")
-    """
-    Manual flow: called by user.
-    k8s context provided. Initial checkpoint status right now as: pending
-    """
 
     
     #pull the  alert from db, if exists, to link with the forensic event
@@ -130,7 +149,14 @@ async def create_manual_alert(request: ForensicCheckpointManualRequest):
 
     return event
 
-@router.get("/{event_id}", response_model=ForensicCheckpointResponse)
+@router.get(
+    "/{event_id}",
+    response_model=ForensicCheckpointResponse,
+    summary="Retrieve a forensic event",
+    description="Returns the current state of a forensic checkpoint event by its UUID.",
+    response_description="Forensic event record including phase and checkpoint location.",
+    responses={404: {"description": "No forensic event exists with the given ID."}},
+)
 async def get_forensic_event(event_id: uuid.UUID):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
