@@ -44,6 +44,7 @@
   priority: WARNING
   tags: [medusa, T1110, credential-access]
 
+
 # - rule: Outbound Connection From Container to Unexpected IP
 #   desc: Detects outbound network connections from a container to an unexpected/blacklisted IP address.
 #   condition: >
