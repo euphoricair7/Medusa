@@ -13,33 +13,47 @@
     - /proc/1/environ
 
 - rule: medusa Shell Spawned in Container
-  desc: Una shell è stata aperta dentro un container — possibile RCE
+  desc: A shell was spawned inside a container — possible RCE
   condition: >
     evt.type = execve
     and proc.name in (bash, sh, zsh, dash)
   output: >
-    Shell aperta nel container
+    Shell spawned in container
     (user=%user.name proc=%proc.name parent=%proc.pname cmd=%proc.cmdline)
   priority: CRITICAL
   tags: [medusa, T1059, execution]
 
 - rule: medusa Sensitive File Read
-  desc: Lettura di file sensibili di sistema
+  desc: Sensitive system file read
   condition: >
     evt.type in (open, openat)
     and fd.name in (medusa_sensitive_files)
   output: >
-    File sensibile aperto in lettura
+    Sensitive file opened for reading
     (user=%user.name file=%fd.name proc=%proc.name cmd=%proc.cmdline)
   priority: ERROR
   tags: [medusa, T1005, collection]
 
 - rule: medusa SSH Brute Force
-  desc: Tentativi multipli di autenticazione SSH fallita
+  desc: Multiple failed SSH authentication attempts
   condition: >
     evt.type = accept
     and fd.sport = 22
   output: >
-    Connessione SSH sul target (src=%fd.sip proc=%proc.name)
+    SSH connection to target (src=%fd.sip proc=%proc.name)
   priority: WARNING
   tags: [medusa, T1110, credential-access]
+
+
+# - rule: Outbound Connection From Container to Unexpected IP
+#   desc: Detects outbound network connections from a container to an unexpected/blacklisted IP address.
+#   condition: >
+#     evt.type in (connect, sendto, sendmsg) and
+#       not fd.net in (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and
+#       not fd.sip in (127.0.0.1, ::1)
+#   output: >
+#       Unexpected outbound connection from container to non-standard IP (%fd.sip). 
+#       Process: (%proc.name).
+#   priority: WARNING
+#   tags: [network, container, security]
+    

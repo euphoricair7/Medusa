@@ -67,10 +67,24 @@ curl http://localhost:8000/alerts/
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/alerts/falco` | Receive alert from Falco |
-| `GET` | `/alerts/` | List alerts — params: `priority`, `container`, `since`, `limit` |
-| `GET` | `/alerts/{id}` | Single alert detail |
+| `GET` | `/alerts/` | List all persisted alerts |
+| `PUT` | `/alerts/{alert_id}` | Update an existing alert |
+| `POST` | `/forensic-checkpoint/falco_alert` | Create forensic event from Falco alert |
+| `POST` | `/forensic-checkpoint/manual_alert` | Manually trigger a forensic checkpoint |
+| `GET` | `/forensic-checkpoint/{event_id}` | Retrieve a forensic event by ID |
 | `GET` | `/health` | Health check |
 
+### API documentation
+
+FastAPI generates interactive and machine-readable API documentation automatically:
+
+| Resource | URL | Description |
+|----------|-----|-------------|
+| Swagger UI | `/docs` | Interactive API explorer |
+| ReDoc | `/redoc` | Read-only reference documentation |
+| OpenAPI specification | `/openapi.json` | Machine-readable OpenAPI 3 schema |
+
+An exported copy of the OpenAPI specification is checked into the repository at `docs/api/openapi.json`. See also [`docs/api/overview.md`](docs/api/overview.md) for ingestion flows and forensic event lifecycle details.
 
 ---
 
