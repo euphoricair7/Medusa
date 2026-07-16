@@ -1,5 +1,11 @@
-from fastapi import APIRouter
+import uuid
+import logging
 from sqlalchemy import select
+from models.alert import Alert
+from fastapi import APIRouter, HTTPException
+from kubernetes.client.rest import ApiException
+from forensic_service import process_trigger_forensic
+from db.session import AsyncSessionLocal
 from models.forensic import (
     ForensicEvent,
     ForensicCheckpointStatus,
@@ -7,10 +13,8 @@ from models.forensic import (
     ForensicCheckpointAlertRequest,
     ForensicCheckpointResponse,
 )
-from models.alert import Alert
-from db.session import SessionLocal as AsyncSessionLocal
-import uuid
-from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -121,32 +125,36 @@ async def create_manual_alert(request: ForensicCheckpointManualRequest):
     async with AsyncSessionLocal() as session:
         if request.alert_id:
             result = await session.execute(
-                select(Alert)
-                .where(Alert.id==request.alert_id)
+                select(Alert).where(Alert.id==request.alert_id)
             )
             if not result.scalars().first():
                 raise HTTPException(status_code=404, detail=f"No alert found with alert_id: {request.alert_id}")
 
-
-        event = ForensicEvent(
-            alert_id= request.alert_id if request.alert_id else None,
-            pod_name=request.pod_name,
-            namespace=request.namespace,
-            container_name=request.container_name,
-            phase=ForensicCheckpointStatus.pending.value,
-            trigger_source="manual",
-            checkpoint_location=None, # to be updated later by the user after checkpointing is done
+        try:
+            event = await process_trigger_forensic(
+                session,
+                alert_id= request.alert_id,
+                rule="manual",
+                priority="Critical",
+                trigger_source="manual",
+                namespace=request.namespace,
+                pod_name=request.pod_name,
+                container_name=request.container_name,
+                raw_alert={
+                    "output_fields": {
+                            "k8s.ns.name": request.namespace,
+                            "k8s.pod.name": request.pod_name,
+                            "container.name": request.container_name,
+                        }
+                },
         )
-        try: 
-            session.add(event)
-            await session.commit()
-            await session.refresh(event)
-
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        except ApiException as e:
+            raise HTTPException(502, f"Kubernetes CR creation failed: {e.reason}")
         except Exception as e:
-            await session.rollback()
-            raise HTTPException(status_code=500, detail=f"Failed to create forensic event: {str(e)}")
-
-
+            logger.exception("manual forensic trigger failed")
+            raise HTTPException(500, f"Failed to create forensic checkpoint: {e}")
     return event
 
 @router.get(

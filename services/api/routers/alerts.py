@@ -1,10 +1,11 @@
+import uuid
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.alert import Alert, AlertOut
 from db.session import get_db
 from datetime import datetime
-import uuid
+from forensic_service import process_forensic_trigger
 
 router = APIRouter()
 
@@ -41,13 +42,27 @@ async def create_falco_alert(alert: dict, db: AsyncSession = Depends(get_db)):
         container_name=alert.get("output_fields", {}).get("container.name"),
         image=alert.get("output_fields", {}).get("container.image.repository"),
         tags=alert.get("tags"),
-        raw_event=alert
+        raw_alert=alert
     )
     db.add(new_alert)
     print("committing")
     await db.commit()
     print("committed")
     await db.refresh(new_alert)
+
+    try: 
+        await process_forensic_trigger(
+            db,
+            alert_id=new_alert.id,
+            rule=new_alert.rule,
+            priority=new_alert.priority,
+            raw_alert=alert,
+        )
+    except ValueError:
+        pass # no k8s context, alert saved, no CR
+    except Exception as e:
+        #log but dont fail alert ingestions
+        print(f"Error triggering forensic: {e}")
 
     print(f"Received Falco alert: {alert}")
     
