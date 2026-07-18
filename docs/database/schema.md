@@ -16,13 +16,7 @@ Stores normalized Falco runtime alerts with the full raw webhook payload for for
 | `container_name` | `TEXT` | YES | Name of the container where the event occurred, extracted from `output_fields.container.name`. |
 | `image` | `TEXT` | YES | Container image repository, extracted from `output_fields.container.image.repository`. |
 | `tags` | `TEXT[]` | YES | Tags associated with the triggered Falco rule (e.g. MITRE technique identifiers). |
-| `raw_event` | `JSONB` | NO | Complete original Falco webhook JSON payload, preserved for full-fidelity replay and analysis. |
-
-### Indexes
-
-- `idx_alerts_received_at` — descending on `received_at` for time-range queries
-- `idx_alerts_priority` — on `priority` for severity filtering
-- `idx_alerts_container` — on `container_name` for container-scoped lookups
+| `raw_event` | `JSONB` | NO | Full payload for replay. Falco alerts store the webhook JSON; manual alerts store the request with `"source": "manual"`. |
 
 ---
 
@@ -45,7 +39,24 @@ Tracks forensic checkpoint jobs from initial alert reception through CRIU snapsh
 | `triggered_priority` | `TEXT` | YES | Priority of the triggering alert at creation time. |
 | `checkpoint_location` | `TEXT` | YES | Storage path or URI where the CRIU memory snapshot artifact is stored after a successful checkpoint. |
 | `raw_alert` | `JSONB` | YES | Original alert payload associated with this event (typically the Falco webhook JSON). |
-| `raw_report` | `JSONB` | YES | Output from checkpoint analysis tools (e.g. `checkpointctl`), stored after processing completes. |
+| `raw_report` | `JSONB` | YES | Operator status and checkpoint analysis output, updated by the sync loop. |
+| `idempotency_key` | `TEXT` | YES | Unique hash deduplicating triggers within a configurable time window. |
+| `operator_cr_name` | `TEXT` | YES | Name of the `ForensicSnapshotChain` CR in Kubernetes. |
+
+---
+
+## Indexes
+
+Defined in [`01_schema.sql`](../../infra/postgres/init/01_schema.sql):
+
+| Index | Table | Purpose |
+| ----- | ----- | ------- |
+| `idx_alerts_received_at` | `alerts` | Time-range listing (`GET /alerts/`) |
+| `idx_alerts_priority` | `alerts` | Severity filtering |
+| `idx_alerts_container` | `alerts` | Container-scoped lookups |
+| `idempotency_key` (UNIQUE) | `forensic_events` | Dedup lookups in shared trigger logic |
+
+No other indexes on `forensic_events` yet. Add them if query patterns require (e.g. filtering by `phase`).
 
 ---
 
@@ -57,8 +68,10 @@ A single Falco alert may spawn zero or more forensic checkpoint events. The rela
 
 - **`forensic_events.alert_id`** is a nullable foreign key to **`alerts.id`**.
 - When `alert_id` is set, the forensic event is explicitly linked to a persisted alert record.
-- When `alert_id` is `NULL`, the event was created without a prior alert row (e.g. a Falco webhook sent directly to the forensic endpoint before alert ingestion, or a fully manual checkpoint with no associated alert).
+- When `alert_id` is `NULL`, the forensic event has no linked alert row.
 
-In the automatic flow, Falco alerts are first persisted via `/alerts/falco`; a separate call to `/forensic-checkpoint/falco_alert` may then reference the stored alert's `id` as `alert_id`. In the manual flow, an analyst may optionally supply an existing `alert_id` to correlate a checkpoint with a previously recorded alert.
+**Manual flow:** **POST `/alerts/manual`** creates a new alert when `alert_id` is omitted, or links an existing alert when supplied.
+
+**Automatic flow (planned):** Falco alerts via `/alerts/falco` will use the same shared forensic trigger. A legacy `/forensic-checkpoint/falco_alert` endpoint exists but does not create operator CRs.
 
 See [`er-diagram.md`](er-diagram.md) for a visual representation of this relationship.

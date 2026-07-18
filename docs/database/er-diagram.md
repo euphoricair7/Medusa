@@ -1,7 +1,5 @@
 # Entity-Relationship Diagram
 
-The diagram below shows the relationship between the core Medusa tables for alerts and forensic events.
-
 ```mermaid
 erDiagram
     alerts {
@@ -29,15 +27,19 @@ erDiagram
         TEXT triggered_rule
         TEXT triggered_priority
         TEXT checkpoint_location
+        TEXT operator_cr_name
+        TEXT idempotency_key UK
         JSONB raw_alert
         JSONB raw_report
     }
 
-    alerts ||--o{ forensic_events : triggers
+    alerts ||--o{ forensic_events : "alert_id"
 ```
 
 ## Relationship semantics
 
-- One **alert** may trigger **zero or more** forensic events (`||--o{`).
-- Each forensic event optionally references exactly one alert via `forensic_events.alert_id`.
-- The foreign key is nullable: forensic events can exist without a linked alert row.
+- One **alert** may have **zero or more** forensic events.
+- Each forensic event optionally references one alert via `forensic_events.alert_id` (nullable FK).
+- **Manual flow:** `POST /alerts/manual` creates a new alert or links via optional `alert_id`.
+- **`idempotency_key`** is unique per event — used to deduplicate triggers within a time window.
+- **`operator_cr_name`** links the DB row to the `ForensicSnapshotChain` CR in Kubernetes.
