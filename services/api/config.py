@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     database_url: str = "postgresql+asyncpg://medusa:medusa@postgres:5432/medusa"
-    kubeconfig_path: str | None = None
+    kubeconfig_path: str = "/kube/config"
     k8s_in_cluster: bool = False
     fsc_cr_namespace: str = "default"
     fsc_default_max_snapshots: int = 3
@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     # host path inside kubelet to path inside medusa-api container
     checkpoint_host_prefix: str = "/var/lib/kubelet/checkpoints"
     checkpoint_container_path: str = "/checkpoints"
-    kubeconfig_path: str = "/kube/config"
 
 settings = Settings()
 

@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS forensic_events(
     raw_alert      JSONB,
     raw_report     JSONB,
     operator_cr_name TEXT,
-    idempotency_key  TEXT UNIQUE,
+    idempotency_key  TEXT UNIQUE
 );
 
 CREATE INDEX idx_alerts_received_at ON alerts (received_at DESC);
