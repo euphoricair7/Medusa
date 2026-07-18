@@ -2,11 +2,11 @@ import hashlib
 import re
 from datetime import datetime, timezone
 from kubernetes.client.rest import ApiException
-from k8s.client import get_k8s_client, FSC_GROUP, FSC_VERSION
+from k8s.client import get_k8s_client, FSC_GROUP, FSC_VERSION, MEDUSA_MANAGED_LABEL, MEDUSA_MANAGED_VALUE
 from config import settings
 
+
 def _sanitize_cr_name(event_id: str, rule: str) -> str:
-    # K8s names: lowercase alphanumeric + hyphen, max 63
     suffix = event_id.replace("-", "")[:8]
     rule_bit = re.sub(r"[^a-z0-9-]", "-", rule.lower())[:20].strip("-")
     return f"fsc-{rule_bit}-{suffix}"[:63]
@@ -43,6 +43,7 @@ def build_forensic_snapshot_chain_body(
       "namespace": settings.fsc_cr_namespace,
       "labels": {
         "medusa.criu.org/forensic-event-id": str(forensic_event_id),
+        MEDUSA_MANAGED_LABEL: MEDUSA_MANAGED_VALUE,
       },
     },
     "spec": {

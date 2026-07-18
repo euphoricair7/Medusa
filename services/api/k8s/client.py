@@ -1,10 +1,14 @@
 from kubernetes import client, config
-from config import settings
+from config import get_settings
 
 FSC_GROUP = "criu.org"
 FSC_VERSION = "v1"
 FSC_PLURAL = "forensicsnapshotchains"
 FORENSIC_EVENT_LABEL = "medusa.criu.org/forensic-event-id"
+MEDUSA_MANAGED_LABEL = "medusa.criu.org/managed"
+MEDUSA_MANAGED_VALUE = "true"
+MEDUSA_FSC_LABEL_SELECTOR = f"{MEDUSA_MANAGED_LABEL}={MEDUSA_MANAGED_VALUE}"
+
 
 _client: "K8sClient | None" = None
 
@@ -17,15 +21,14 @@ def get_k8s_client() -> "K8sClient":
 
 class K8sClient:
     def __init__(self) -> None:
-        settings = get_settings()
-        if settings.k8s_in_cluster:
+        if get_settings().k8s_in_cluster:
             config.load_incluster_config()
         else:
-            path = settings.kubeconfig_path or "/kube/config"
+            path = get_settings().kubeconfig_path or "/kube/config"
             config.load_kube_config(config_file=path)
         self._core = client.CoreV1Api()
         self._custom = client.CustomObjectsApi()
-        self._settings = settings
+        self._settings = get_settings()
     
     def get_pod(self, namespace: str, pod_name: str):
         return self._core.read_namespaced_pod(name=pod_name, namespace=namespace)
@@ -55,4 +58,4 @@ class K8sClient:
             plural=FSC_PLURAL,
             name=name,
         )
-
+        

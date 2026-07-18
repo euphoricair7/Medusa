@@ -2,8 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
-import logging
-from contextlib import asynccontextmanager     
+import logging 
 
 from forensic_sync import run_forensic_sync
 from db.session import engine, Base, SessionLocal
