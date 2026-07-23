@@ -49,6 +49,10 @@ class ForensicEvent(Base):
     raw_alert           = Column(JSONB)        # original Falco alert JSON
     raw_report          = Column(JSONB)        # checkpointctl analysis output
 
+    #idempotency key
+    idempotency_key = Column(Text, unique=True, nullable=True)
+    operator_cr_name = Column(Text)
+
 
 """
 Manual schema for now, until we have the logic to link the alert and 
@@ -70,7 +74,7 @@ class ForensicCheckpointManualRequest(BaseModel):
         description="Name of the Kubernetes pod hosting the compromised container.",
         json_schema_extra={"example": "medusa-target-deploy"}
     )
-    namespace: str = "default" = Field(
+    namespace: str = Field(
         default="default", 
         description="Kubernetes namespace of the target pod."
     )
@@ -93,8 +97,7 @@ class ForensicCheckpointAlertRequest(BaseModel):
     Automated forensic checkpointing request.
     Reuses the payload structure sent by Falco webhooks.
     """
-    alert_id: Optional[uuid.UUID] = None
-    = Field(
+    alert_id: Optional[uuid.UUID]= Field(
         default=None, 
         description="Database ID of the persisted Falco alert, if already registered."
     ) # to link with the alert in db, if it exists
@@ -175,6 +178,10 @@ class ForensicCheckpointResponse(BaseModel):
     message: Optional[str] = Field(
         default=None, 
         description="Additional message or details about the forensic checkpoint or event status."
+    )
+    operator_cr_name: Optional[str] = Field(
+        default=None,
+        description="Name of the operator CR that triggered the forensic checkpointing."
     )
 
 

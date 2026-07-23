@@ -1,42 +1,36 @@
 # Architecture Overview
 
-Medusa combines runtime threat detection (Falco), alert persistence (FastAPI + PostgreSQL), and forensic checkpoint capture into a pipeline designed for container incident response.
+Medusa combines runtime threat detection (Falco), alert persistence (FastAPI + PostgreSQL), and forensic checkpoint capture via the checkpoint-restore-operator.
 
 ## System flow
 
 ```mermaid
 flowchart LR
-    Falco["Falco<br/>(eBPF runtime detection)"]
-    AlertsAPI["Alerts API<br/>POST /alerts/falco"]
-    ForensicAPI["Forensic API<br/>/forensic-checkpoint/*"]
-    ManualUser["Manual User<br/>(Analyst)"]
+    Falco["Falco"]
+    Analyst["Analyst"]
+    AlertsAPI["Alerts API<br/>/alerts/*"]
     PostgreSQL[("PostgreSQL")]
-    AlertsTable["alerts"]
-    ForensicTable["forensic_events"]
-    CheckpointPipeline["Checkpoint Pipeline<br/>(CRIU operator)"]
-    CheckpointStorage["Checkpoint Storage<br/>(snapshot artifacts)"]
+    K8sCR["ForensicSnapshotChain CR"]
+    Operator["checkpoint-restore-operator"]
+    Storage["Checkpoint Storage"]
 
-    Falco -->|"webhook JSON"| AlertsAPI
+    Falco -->|"POST /alerts/falco"| AlertsAPI
+    Analyst -->|"POST /alerts/manual"| AlertsAPI
     AlertsAPI --> PostgreSQL
-    PostgreSQL --- AlertsTable
-
-    ManualUser -->|"POST /manual_alert"| ForensicAPI
-    Falco -->|"POST /falco_alert"| ForensicAPI
-    ForensicAPI --> PostgreSQL
-    PostgreSQL --- ForensicTable
-
-    AlertsTable -->|"alert_id FK"| ForensicTable
-    ForensicTable -->|"phase: pending → queued"| CheckpointPipeline
-    CheckpointPipeline -->|"CRIU snapshot"| CheckpointStorage
-    CheckpointPipeline -->|"updates phase, checkpoint_location"| ForensicTable
+    AlertsAPI -->|"process_trigger_forensic"| K8sCR
+    K8sCR --> Operator
+    Operator --> Storage
+    Operator -->|"status sync"| PostgreSQL
 ```
 
-## How the components interact
+## Component interaction
 
-**Falco** monitors container syscalls via eBPF and fires HTTP webhooks when custom rules match suspicious activity. In the current v1 deployment, Falco sends alerts directly to the **Alerts API**, which normalizes and stores each event in the `alerts` table.
+**Falco** sends runtime alerts to **POST `/alerts/falco`**, which persists them in the `alerts` table.
 
-The **Forensic API** provides two entry points. The automatic path (`/forensic-checkpoint/falco_alert`) accepts Falco alert payloads and creates forensic events for checkpoint processing. The manual path (`/forensic-checkpoint/manual_alert`) allows an analyst to trigger a checkpoint with explicit Kubernetes context when automatic enrichment is unavailable.
+**Analysts** trigger checkpoints via **POST `/alerts/manual`** with explicit Kubernetes context. The API creates or links an alert, writes a `forensic_events` record, and creates a **ForensicSnapshotChain** CR (`criu.org/v1`).
 
-Both APIs write to **PostgreSQL**. Forensic events optionally reference alerts through a foreign key (`forensic_events.alert_id → alerts.id`), enabling correlation between the original detection and subsequent evidence capture.
+The **checkpoint-restore-operator** reconciles the CR, captures CRIU snapshots to storage, and updates CR status. Medusa polls CR status and maps operator phases back to `forensic_events` (e.g. `Completed` → `success`).
 
-The **Checkpoint Pipeline** (planned Kubernetes operator) watches forensic events in `pending` or `queued` phase, resolves container targets, executes CRIU memory snapshots, and writes artifacts to **Checkpoint Storage**. On completion it updates the event phase to `success` or `failed` and records the storage location in `checkpoint_location`.
+**GET `/forensic-checkpoint/{event_id}`** reads forensic state from PostgreSQL. Unified Falco automation via `/alerts/falco` and removal of the legacy `/forensic-checkpoint/falco_alert` stub are follow-up work.
+
+Forensic events optionally link to alerts via `forensic_events.alert_id → alerts.id`.

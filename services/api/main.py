@@ -1,10 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import asyncio
+import logging 
 
+from forensic_sync import run_forensic_sync
 from db.session import engine, Base, SessionLocal
 from routers import alerts,forensic
 
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -12,7 +16,20 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         # await conn.run_sync(Base.metadata.drop_all) # drop all tables
         await conn.run_sync(Base.metadata.create_all)
+
+    stop_event = asyncio.Event()
+    sync_task = asyncio.create_task(run_forensic_sync(stop_event))
+
     yield
+    
+    stop_event.set()
+    sync_task.cancel()
+    try:
+        await sync_task
+    except asyncio.CancelledError:
+        logger.info("Forensic sync task cancelled")
+    except Exception as e:
+        logger.error("Forensic sync task error: %s", e)
     await engine.dispose()
 
 

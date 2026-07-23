@@ -46,18 +46,22 @@ services:
       - api
     restart: unless-stopped
 
-  # API — FastAPI gets the Falco alerts and it saves them on postgres
+  # API: FastAPI gets the Falco alerts and it saves them on postgres
   api:
     build:
       context: ./services/api
     container_name: medusa-api
     hostname: api
-    networks:
-      - internal-net
-    ports:
-      - "8000:8000"
+    network_mode: host
     environment:
-      - DATABASE_URL=postgresql+asyncpg://medusa:${POSTGRES_PASSWORD:-medusa}@postgres:5432/medusa
+      - DATABASE_URL=postgresql+asyncpg://medusa:${POSTGRES_PASSWORD:-medusa}@127.0.0.1:5432/medusa
+      - KUBECONFIG_PATH=/kube/config
+      - K8S_IN_CLUSTER=false
+      - CHECKPOINT_HOST_PATH=/checkpoints
+      - CHECKPOINT_HOST_PREFIX=/var/lib/kubelet/checkpoints
+    volumes:
+      - ${HOME}/.kube/config:/kube/config:ro
+      - /var/lib/kubelet/checkpoints:/checkpoints:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,7 +72,9 @@ services:
     container_name: medusa-postgres
     hostname: postgres
     networks:
-      - internal-net
+      - lab-net
+    ports:
+      - "5432:5432"
     environment:
       - POSTGRES_USER=medusa
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-medusa}

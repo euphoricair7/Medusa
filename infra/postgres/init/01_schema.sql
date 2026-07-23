@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS forensic_events(
     triggered_priority TEXT,
     checkpoint_location TEXT,
     raw_alert      JSONB,
-    raw_report     JSONB
+    raw_report     JSONB,
+    operator_cr_name TEXT,
+    idempotency_key  TEXT UNIQUE
 );
 
 CREATE INDEX idx_alerts_received_at ON alerts (received_at DESC);
