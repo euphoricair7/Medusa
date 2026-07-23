@@ -60,14 +60,44 @@ Medusa/
 
 ### Quickstart
 
+**Prerequisites:** Docker Compose, a local Kubernetes cluster with the checkpoint-restore-operator installed, and a host kubeconfig mounted into the API container. The apiserver URL in kubeconfig must be reachable from Docker containers (use your node IP, not `127.0.0.1`).
+
 ```bash
+# One-time: point kubeconfig at a container-reachable apiserver
+export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+kubectl config set-cluster $(kubectl config view --minify -o jsonpath='{.clusters[0].name}') \
+  --server=https://${NODE_IP}:6443
+
 cp .env.example .env
 docker compose up --build
 
 # verify
 curl http://localhost:8000/health
-curl "http://localhost:8080/ping?host=localhost;id"   # trigger a Falco alert
+curl "http://localhost:8080/ping?host=localhost;id"   # trigger a Falco alert (see note below)
 curl http://localhost:8000/alerts/
+```
+
+The `/ping` endpoint is intentionally vulnerable: the `;id` suffix runs shell injection as root. `ping` may be missing in the target image (`ping: not found` in stderr is normal); Falco still detects the spawned shell.
+
+### Docker lab networking
+
+All compose services share the **`medusa-lab-net`** bridge network (`lab-net` in `docker-compose.yml`). Service DNS names match container hostnames:
+
+| Service  | Hostname   | Host access        | In-network access        |
+|----------|------------|--------------------|--------------------------|
+| target   | `target`   | `localhost:8080`   | `http://target:8080`     |
+| api      | `api`      | `localhost:8000`   | `http://api:8000`        |
+| postgres | `postgres` | `localhost:5432`   | `postgres:5432`          |
+| falco    | `falco`    | —                  | webhook → `http://api:8000/alerts/falco` |
+
+The API connects to PostgreSQL at `postgres:5432` and mounts `${HOME}/.kube/config` for Kubernetes CR creation. Falco delivers alerts to the API over Docker DNS (`api:8000`), which requires the API to be on `lab-net` rather than `network_mode: host`.
+
+Manual checkpoint test (requires a running pod in the cluster):
+
+```bash
+curl -X POST http://localhost:8000/alerts/manual \
+  -H "Content-Type: application/json" \
+  -d '{"pod_name":"nginx","namespace":"default","container_name":"nginx"}'
 ```
 
 ### API endpoints (v1)

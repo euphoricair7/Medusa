@@ -15,12 +15,14 @@ An exported copy of the OpenAPI specification is also checked into the repositor
 ## Alert ingestion (Falco)
 
 1. **Falco** detects a rule match and emits JSON via its HTTP webhook.
-2. The webhook **POST** goes to `/alerts/falco`.
+2. In Docker Compose, Falco posts to `http://api:8000/alerts/falco` (configured in `infra/falco/falco.yaml`). Both services must share the `lab-net` network so the `api` hostname resolves.
 3. The API normalizes the payload and stores it in PostgreSQL (`alerts` table).
 
 ```
-Falco ──webhook──▶ POST /alerts/falco ──▶ PostgreSQL (alerts)
+Falco (lab-net) ──webhook http://api:8000/alerts/falco──▶ POST /alerts/falco ──▶ PostgreSQL (alerts)
 ```
+
+From the host, trigger a lab alert via the vulnerable target (`curl "http://localhost:8080/ping?host=localhost;id"`) and list ingested alerts with `GET /alerts/`. The target response may show `ping: not found` in stderr; the shell injection still fires Falco rules.
 
 ## Manual forensic checkpoint
 
