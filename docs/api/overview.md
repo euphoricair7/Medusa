@@ -10,16 +10,23 @@ The Medusa API receives Falco alerts, persists them for analysis, and coordinate
 | ReDoc                 | `[/redoc](http://localhost:8000/redoc)`               | Read-only, structured reference documentation       |
 | OpenAPI specification | `[/openapi.json](http://localhost:8000/openapi.json)` | Machine-readable OpenAPI 3 schema served by FastAPI |
 
-An exported copy of the OpenAPI specification is also checked into the repository at `[docs/api/openapi.json](openapi.json)`.
+The live OpenAPI schema is served at `http://localhost:8000/openapi.json` when the API is running.
 
 ## Alert ingestion (Falco)
 
 1. **Falco** detects a rule match and emits JSON via its HTTP webhook.
 2. In Docker Compose, Falco posts to `http://api:8000/alerts/falco` (configured in `infra/falco/falco.yaml`). Both services must share the `lab-net` network so the `api` hostname resolves.
 3. The API normalizes the payload and stores it in PostgreSQL (`alerts` table).
+4. When the alert includes Kubernetes context in `output_fields` (e.g. `k8s.pod.name`) and priority meets the configured threshold, the API runs the shared forensic trigger (`process_trigger_forensic`) for the new alert row. Forensic errors are logged but do not fail ingestion — the endpoint still returns `{"status": "ok"}`.
 
 ```
-Falco (lab-net) ──webhook http://api:8000/alerts/falco──▶ POST /alerts/falco ──▶ PostgreSQL (alerts)
+Falco (lab-net) ──webhook──▶ POST /alerts/falco ──▶ PostgreSQL (alerts)
+                                                      │
+                                                      ▼
+                                              process_trigger_forensic
+                                                      │
+                                                      ▼
+                                         ForensicSnapshotChain CR (when k8s context present)
 ```
 
 From the host, trigger a lab alert via the vulnerable target (`curl "http://localhost:8080/ping?host=localhost;id"`) and list ingested alerts with `GET /alerts/`. The target response may show `ping: not found` in stderr; the shell injection still fires Falco rules.
@@ -44,7 +51,23 @@ Analyst ──▶ POST /alerts/manual ──▶ Alert (create/link) ──▶ fo
                                   GET /forensic-checkpoint/{id} ◀── status sync ◀─────┘
 ```
 
-Unified automatic ingestion via `/alerts/falco` is planned. A legacy **POST** `/forensic-checkpoint/falco_alert` stub exists but does not create operator CRs.
+Both `/alerts/falco` and `/alerts/manual` use the same shared trigger and idempotency semantics below. A legacy **POST** `/forensic-checkpoint/falco_alert` stub exists but does not create operator CRs and does not participate in alert-scoped dedup.
+
+## Idempotency and CR retry
+
+Forensic triggers are deduplicated per alert row, not by time bucket:
+
+```
+idempotency_key = sha256("{alert_id}:{namespace}:{pod_name}:{container_name}")
+```
+
+| Situation | Behavior |
+| --------- | -------- |
+| Same `alert_id` resubmitted, CR exists, phase `queued` / `in_progress` / `success` | Return existing forensic event |
+| CR deleted from cluster, or phase `failed` | Recreate `ForensicSnapshotChain` on the same DB row; reset `checkpoint_location` |
+| Two different alerts, same pod within seconds | Two distinct forensic events (distinct `alert_id`) |
+
+Unit tests: `tests/api-test/test_idempotency_key.py`, `test_idempotency_dedup.py`, `test_forensic_cr_retry.py`.
 
 ## Forensic event lifecycle
 
@@ -61,7 +84,7 @@ Unified automatic ingestion via `/alerts/falco` is planned. A legacy **POST** `/
 
 | Method | Path                               | Purpose                                   |
 | ------ | ---------------------------------- | ----------------------------------------- |
-| `POST` | `/alerts/falco`                    | Ingest a Falco webhook alert              |
+| `POST` | `/alerts/falco`                    | Ingest a Falco webhook alert; triggers forensic capture when k8s context is present |
 | `POST` | `/alerts/manual`                   | Manually trigger a forensic checkpoint    |
 | `GET`  | `/alerts/`                         | List persisted alerts                     |
 | `PUT`  | `/alerts/{alert_id}`               | Update an existing alert                  |

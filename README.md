@@ -8,7 +8,7 @@ Medusa detects attacks on containerised workloads using Falco, automatically cap
 
 ## Current state — v1
 
-v1 is the minimal working foundation: a vulnerable target container monitored by Falco, with alerts persisted to PostgreSQL via a FastAPI backend. Analysts can manually trigger CRIU checkpoint capture through the checkpoint-restore-operator via `POST /alerts/manual`.
+v1 is the minimal working foundation: a vulnerable target container monitored by Falco, with alerts persisted to PostgreSQL via a FastAPI backend. Falco webhook ingestion and manual analyst triggers both run the shared forensic pipeline (`process_trigger_forensic`) to create CRIU checkpoint capture jobs via the checkpoint-restore-operator.
 
 ```
 Medusa/
@@ -51,11 +51,13 @@ Medusa/
 ```
  target  ──syscalls──▶  falco  ──webhook──▶  api  ──▶  postgres
  analyst ──manual────▶  api  ──▶  ForensicSnapshotChain CR  ──▶  operator
+                              ▲
+                              └── falco ingest also triggers forensic when k8s context is present
 ```
 
 1. **target** runs a FastAPI app with intentional vulnerabilities (command injection, path traversal, weak SSH).
 2. **falco** monitors syscalls via eBPF and sends alerts to **POST `/alerts/falco`**.
-3. **api** persists alerts and, on manual trigger (**POST `/alerts/manual`**), creates forensic events and operator CRs.
+3. **api** persists alerts and runs the shared forensic trigger on Falco ingest (when k8s context and priority allow) and on **POST `/alerts/manual`**, creating forensic events and operator CRs.
 4. **postgres** stores alerts and forensic event state; a background sync updates phases from operator CR status.
 
 ### Quickstart
@@ -104,7 +106,7 @@ curl -X POST http://localhost:8000/alerts/manual \
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/alerts/falco` | Receive alert from Falco |
+| `POST` | `/alerts/falco` | Receive alert from Falco; triggers forensic capture when k8s context is present |
 | `GET` | `/alerts/` | List all persisted alerts |
 | `PUT` | `/alerts/{alert_id}` | Update an existing alert |
 | `POST` | `/alerts/manual` | Manually trigger a forensic checkpoint |
@@ -122,7 +124,20 @@ FastAPI generates interactive and machine-readable API documentation automatical
 | ReDoc | `/redoc` | Read-only reference documentation |
 | OpenAPI specification | `/openapi.json` | Machine-readable OpenAPI 3 schema |
 
-An exported copy of the OpenAPI specification is checked into the repository at `docs/api/openapi.json`. See also [`docs/api/overview.md`](docs/api/overview.md) for ingestion flows and forensic event lifecycle details.
+See [`docs/api/overview.md`](docs/api/overview.md) for ingestion flows, idempotency semantics, and forensic event lifecycle details.
+
+### Tests
+
+From the repository root:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest
+```
+
+Run a single file or test with `pytest tests/api-test/test_idempotency_dedup.py` or `pytest path/to/test.py::test_name`.
 
 ---
 
