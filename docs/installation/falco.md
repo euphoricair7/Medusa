@@ -10,7 +10,7 @@ Medusa can run Falco in two ways. Both send alerts to the same API endpoint (**P
 | **Rules** | `infra/falco/rules/medusa_rules.yaml` mounted into the container | Same file, embedded via Helm `customRules` |
 | **Webhook URL** | `http://api:8000/alerts/falco` (Docker DNS on `lab-net`) | `http://<NODE_IP>:8000/alerts/falco` (must be reachable from cluster pods) |
 | **K8s metadata** | Limited (Docker target only; no `k8s.pod.name` on lab target) | Full (`k8s.ns.name`, `k8s.pod.name` via container/CRI collector) |
-| **Forensic auto-trigger** | Only if payload includes k8s context (usually via cluster Falco) | Yes, for Medusa-tagged rules on cluster pods |
+| **Forensic auto-trigger** | Unlikely (lab target lacks `k8s.pod.name`; non-`medusa` default rules stored only) | Yes, for `medusa`-tagged rules on cluster pods with priority ≥ warning |
 
 **Do not run both at once** unless you intend to — you will get duplicate or confusing alerts.
 
@@ -51,7 +51,23 @@ curl "http://localhost:8080/ping?host=localhost;id"   # shell injection on targe
 curl http://localhost:8000/alerts/
 ```
 
-Alerts from the lab target typically **lack** `k8s.pod.name`; ingestion still works, but automatic forensic CR creation needs cluster Falco (Option B).
+Alerts from the lab target typically **lack** `k8s.pod.name`; ingestion still works, but automatic forensic CR creation requires cluster Falco (Option B) and a `medusa`-tagged rule.
+
+---
+
+## API pipeline (after Falco delivers alerts)
+
+Regardless of install path, Falco POSTs to the same endpoint. The API behavior is documented in [`docs/api/overview.md`](../api/overview.md#alert-ingestion-falco):
+
+1. **Always** save the alert to PostgreSQL.
+2. **Conditionally** create a `forensic_events` row and `ForensicSnapshotChain` CR when:
+   - rule `tags` include `medusa`,
+   - `priority` ≥ `warning` (configurable via `MIN_ALERT_PRIORITY`),
+   - `k8s.pod.name` is present in `output_fields`.
+3. **Pod dedup** — multiple alerts on the same pod during an active capture reuse one CR.
+4. **Alert idempotency** — resubmitting the same alert row does not create a duplicate CR.
+
+Configure the API priority floor in `services/api/config.py` or via the `MIN_ALERT_PRIORITY` environment variable.
 
 ### Stop
 

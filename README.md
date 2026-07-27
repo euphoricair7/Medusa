@@ -57,12 +57,12 @@ Medusa/
  target  ──syscalls──▶  falco  ──webhook──▶  api  ──▶  postgres
  analyst ──manual────▶  api  ──▶  ForensicSnapshotChain CR  ──▶  operator
                               ▲
-                              └── falco ingest also triggers forensic when k8s context is present
+                              └── falco ingest: medusa tag + k8s context + priority → forensic CR
 ```
 
 1. **target** runs a FastAPI app with intentional vulnerabilities (command injection, path traversal, weak SSH).
 2. **falco** monitors syscalls via eBPF and sends alerts to **POST `/alerts/falco`**.
-3. **api** persists alerts and runs the shared forensic trigger on Falco ingest (when k8s context and priority allow) and on **POST `/alerts/manual`**, creating forensic events and operator CRs.
+3. **api** persists every Falco alert, then runs the shared forensic trigger when the rule has the `medusa` tag, k8s pod context is present, and priority meets the threshold. Manual **POST `/alerts/manual`** uses the same pipeline. Pod dedup avoids duplicate CRs during active captures on the same pod.
 4. **postgres** stores alerts and forensic event state; a background sync updates phases from operator CR status.
 
 ### Quickstart
@@ -95,7 +95,7 @@ Medusa supports two Falco deployments. Both post to **POST** `/alerts/falco`; pi
 | **Docker Compose** (lab) | `docker compose up` includes the `falco` service | Compose `target` container via Docker socket |
 | **Cluster** (Helm) | `scripts/falco-daemonset-setup.sh` | Pods in your Kubernetes cluster |
 
-Use **cluster Falco** for the full pipeline (k8s context in alerts, automatic forensic CRs on cluster pods). Use **compose Falco** for local lab demos against the vulnerable target.
+Use **cluster Falco** for the full pipeline (`medusa`-tagged rules, k8s metadata in alerts, automatic forensic CRs on cluster pods). Use **compose Falco** for local lab demos — alerts are stored, but the lab `target` usually lacks `k8s.pod.name` so CRs are not created automatically.
 
 When using cluster Falco, start only `api` and `postgres` from compose (omit the `falco` service). See [`docs/installation/falco.md`](docs/installation/falco.md) for install steps, env vars, and troubleshooting.
 
@@ -124,7 +124,7 @@ curl -X POST http://localhost:8000/alerts/manual \
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/alerts/falco` | Receive alert from Falco; triggers forensic capture when k8s context is present |
+| `POST` | `/alerts/falco` | Receive alert from Falco; always persisted; triggers forensic when `medusa` tag, k8s context, and priority ≥ warning |
 | `GET` | `/alerts/` | List all persisted alerts |
 | `PUT` | `/alerts/{alert_id}` | Update an existing alert |
 | `POST` | `/alerts/manual` | Manually trigger a forensic checkpoint |
@@ -142,7 +142,7 @@ FastAPI generates interactive and machine-readable API documentation automatical
 | ReDoc | `/redoc` | Read-only reference documentation |
 | OpenAPI specification | `/openapi.json` | Machine-readable OpenAPI 3 schema |
 
-See [`docs/api/overview.md`](docs/api/overview.md) for ingestion flows, idempotency semantics, and forensic event lifecycle details.
+See [`docs/api/overview.md`](docs/api/overview.md) for ingestion flows, webhook URLs (dev vs prod), pod dedup, idempotency semantics, and forensic event lifecycle details.
 
 ### Tests
 
