@@ -9,6 +9,8 @@ CREATE TABLE alerts (
     priority       TEXT NOT NULL,
     output         TEXT NOT NULL,
     container_name TEXT,
+    namespace      TEXT,
+    pod_name       TEXT,
     image          TEXT,
     tags           TEXT[],
     raw_event      JSONB NOT NULL
@@ -36,6 +38,9 @@ CREATE TABLE IF NOT EXISTS forensic_events(
 CREATE INDEX idx_alerts_received_at ON alerts (received_at DESC);
 CREATE INDEX idx_alerts_priority    ON alerts (priority);
 CREATE INDEX idx_alerts_container   ON alerts (container_name);
+CREATE INDEX idx_alerts_namespace ON alerts (namespace);
+CREATE INDEX idx_alerts_pod_name   ON alerts (pod_name);
+
 
 CREATE TABLE snapshots (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
