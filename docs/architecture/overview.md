@@ -39,9 +39,22 @@ The **checkpoint-restore-operator** reconciles the CR, captures CRIU snapshots t
 
 Forensic events optionally link to alerts via `forensic_events.alert_id → alerts.id`.
 
+## Falco deployment modes
+
+Falco is the runtime sensor that webhooks alerts to the API. Medusa supports two installs:
+
+| Mode | Install | Webhook target | Workloads observed |
+| ---- | ------- | -------------- | ------------------ |
+| **Docker Compose** | `falco` service in `docker-compose.yml`, config in `infra/falco/falco.yaml` | `http://api:8000/alerts/falco` (Docker DNS) | Compose `target` container |
+| **Cluster (Helm)** | `scripts/falco-daemonset-setup.sh` | `http://<NODE_IP>:8000/alerts/falco` | Kubernetes pods cluster-wide |
+
+Both load [`infra/falco/rules/medusa_rules.yaml`](../../infra/falco/rules/medusa_rules.yaml). Automatic forensic capture on Falco ingest requires Kubernetes context in the alert payload (`k8s.pod.name` in `output_fields`), which cluster Falco provides for pod workloads.
+
+See [`docs/installation/falco.md`](../installation/falco.md) for setup, env vars, and troubleshooting. Do not run both Falco installs simultaneously unless you intend to.
+
 ## Local development stack (Docker Compose)
 
-The v1 lab runs four services on the shared `medusa-lab-net` bridge network:
+The v1 lab can run four services on the shared `medusa-lab-net` bridge network (omit `falco` when using cluster Helm Falco instead):
 
 ```
 ┌─────────┐  syscalls   ┌───────┐  http://api:8000/alerts/falco   ┌─────┐  postgres:5432  

@@ -2,7 +2,7 @@
 
 The Medusa API receives Falco alerts, persists them for analysis, and coordinates forensic checkpoint events that capture container memory state via the checkpoint-restore-operator.
 
-## Interactive documentation
+## Documents:
 
 | Resource              | URL                                                   | Description                                         |
 | --------------------- | ----------------------------------------------------- | --------------------------------------------------- |
@@ -15,21 +15,23 @@ The live OpenAPI schema is served at `http://localhost:8000/openapi.json` when t
 ## Alert ingestion (Falco)
 
 1. **Falco** detects a rule match and emits JSON via its HTTP webhook.
-2. In Docker Compose, Falco posts to `http://api:8000/alerts/falco` (configured in `infra/falco/falco.yaml`). Both services must share the `lab-net` network so the `api` hostname resolves.
+2. Falco posts to **POST** `/alerts/falco`. The webhook URL depends on the install:
+   - **Docker Compose Falco:** `http://api:8000/alerts/falco` (`infra/falco/falco.yaml`, `lab-net` DNS).
+   - **Cluster Falco (Helm):** `http://<NODE_IP>:8000/alerts/falco` (configured by `scripts/falco-daemonset-setup.sh`; must be reachable from Falco pods).
 3. The API normalizes the payload and stores it in PostgreSQL (`alerts` table).
 4. When the alert includes Kubernetes context in `output_fields` (e.g. `k8s.pod.name`) and priority meets the configured threshold, the API runs the shared forensic trigger (`process_trigger_forensic`) for the new alert row. Forensic errors are logged but do not fail ingestion — the endpoint still returns `{"status": "ok"}`.
 
-```
-Falco (lab-net) ──webhook──▶ POST /alerts/falco ──▶ PostgreSQL (alerts)
-                                                      │
-                                                      ▼
-                                              process_trigger_forensic
-                                                      │
-                                                      ▼
-                                         ForensicSnapshotChain CR (when k8s context present)
-```
+See [`docs/installation/falco.md`](../installation/falco.md) for install steps and the Docker vs Helm distinction.
 
-From the host, trigger a lab alert via the vulnerable target (`curl "http://localhost:8080/ping?host=localhost;id"`) and list ingested alerts with `GET /alerts/`. The target response may show `ping: not found` in stderr; the shell injection still fires Falco rules.
+```
+Falco ──webhook──▶ POST /alerts/falco ──▶ PostgreSQL (alerts)
+                                              │
+                                              ▼
+                                      process_trigger_forensic
+                                              │
+                                              ▼
+                             ForensicSnapshotChain CR (when k8s context present)
+```
 
 ## Manual forensic checkpoint
 
