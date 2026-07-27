@@ -21,7 +21,7 @@ services:
 
   # Falco — monitoring syscall on the target
   falco:
-    image: falcosecurity/falco:latest
+    image: falcosecurity/falco:0.44.1
     container_name: medusa-falco
     hostname: falco
     privileged: true
@@ -34,13 +34,14 @@ services:
       - lab-net
       - internal-net
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/host/var/run/docker.sock:ro
       - /proc:/host/proc:ro
       - /etc:/host/etc:ro
       - /sys/kernel/btf/vmlinux:/sys/kernel/btf/vmlinux:ro
       - /sys/kernel/tracing:/sys/kernel/tracing:ro
       - ./infra/falco/falco.yaml:/etc/falco/falco.yaml:ro
       - ./infra/falco/rules:/etc/falco/rules.d:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
     depends_on:
       - target
       - api
