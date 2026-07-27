@@ -1,8 +1,30 @@
-# medusa custom rules v1
-# These rules cover the TTPs generated in the vulnerable target host
-# NOTE: falco_rules.yaml NOT loaded (requires container plugin >= 0.4.0, not in plain image).
-#       All container.* fields are plugin-owned and unavailable without it.
-#       Rules use raw evt.type conditions instead of high-level macros.
+# medusa custom rules — requires container plugin (load_plugins: [container])
+# Docker Compose target: container.* fields only
+# K8s pods (with CRI engine): also k8s.ns.name, k8s.pod.name in output_fields
+
+- list: medusa_lab_ignore
+  items:
+    - medusa-postgres
+    - medusa-api
+    - medusa-falco
+
+- list: medusa_cluster_ignore_ns
+  items:
+    - kube-system
+    - kube-public
+    - falco
+
+- macro: medusa_ignore_pod
+  condition: (k8s.pod.name startswith "checksum-helper")
+
+- macro: medusa_lab_noise
+  condition: >
+    (container.name in (medusa_lab_ignore))
+      or medusa_ignore_pod
+
+- macro: k8s_workload
+  condition: (k8s.pod.name exists)
+
 
 - list: medusa_sensitive_files
   items:
@@ -15,45 +37,48 @@
 - rule: medusa Shell Spawned in Container
   desc: A shell was spawned inside a container — possible RCE
   condition: >
-    evt.type = execve
+    spawned_process
+    and container
     and proc.name in (bash, sh, zsh, dash)
+    and not medusa_lab_noise
+    and k8s_workload
   output: >
     Shell spawned in container
-    (user=%user.name proc=%proc.name parent=%proc.pname cmd=%proc.cmdline)
+    (k8s.ns.name=%k8s.ns.name k8s.pod.name=%k8s.pod.name
+     container.name=%container.name container.id=%container.id
+     container.image=%container.image.repository
+     user=%user.name parent=%proc.pname cmd=%proc.cmdline)
   priority: CRITICAL
   tags: [medusa, T1059, execution]
 
 - rule: medusa Sensitive File Read
-  desc: Sensitive system file read
+  desc: Sensitive system file read inside a container
   condition: >
-    evt.type in (open, openat)
+    evt.type in (open, openat, openat2)
+    and evt.is_open_read=true
+    and container
     and fd.name in (medusa_sensitive_files)
+    and not medusa_lab_noise
+    and k8s_workload
   output: >
     Sensitive file opened for reading
-    (user=%user.name file=%fd.name proc=%proc.name cmd=%proc.cmdline)
+    (k8s.ns.name=%k8s.ns.name k8s.pod.name=%k8s.pod.name
+     container.name=%container.name container.id=%container.id
+     user=%user.name file=%fd.name proc=%proc.name cmd=%proc.cmdline)
   priority: ERROR
   tags: [medusa, T1005, collection]
 
 - rule: medusa SSH Brute Force
-  desc: Multiple failed SSH authentication attempts
+  desc: Inbound SSH connection to container port 22
   condition: >
     evt.type = accept
+    and container
     and fd.sport = 22
+    and not medusa_lab_noise
+    and k8s_workload
   output: >
-    SSH connection to target (src=%fd.sip proc=%proc.name)
+    SSH connection to container
+    (k8s.ns.name=%k8s.ns.name k8s.pod.name=%k8s.pod.name
+     container.name=%container.name src=%fd.sip proc=%proc.name)
   priority: WARNING
   tags: [medusa, T1110, credential-access]
-
-
-# - rule: Outbound Connection From Container to Unexpected IP
-#   desc: Detects outbound network connections from a container to an unexpected/blacklisted IP address.
-#   condition: >
-#     evt.type in (connect, sendto, sendmsg) and
-#       not fd.net in (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and
-#       not fd.sip in (127.0.0.1, ::1)
-#   output: >
-#       Unexpected outbound connection from container to non-standard IP (%fd.sip). 
-#       Process: (%proc.name).
-#   priority: WARNING
-#   tags: [network, container, security]
-    
