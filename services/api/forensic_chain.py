@@ -20,7 +20,12 @@ def _build_selector_for_pod(namespace: str, pod_name: str) -> dict:
     if labels:
         k, v = next(iter(labels.items()))
         return {"matchLabels": {k: v}}
-    raise ValueError(f"Pod {namespace}/{pod_name} has no labels for selector")
+      
+    """
+    Incase of Label-less pods, k8s automatically handles
+    pod name generation.
+    """
+    return {"matchLabels": {"kubernetes.io/metadata.name": pod_name}}
 
 
 def build_forensic_snapshot_chain_body(
