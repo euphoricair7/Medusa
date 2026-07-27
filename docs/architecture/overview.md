@@ -35,7 +35,7 @@ flowchart LR
 
 The **checkpoint-restore-operator** reconciles the CR, captures CRIU snapshots to storage, and updates CR status. Medusa polls CR status and maps operator phases back to `forensic_events` (e.g. `Completed` → `success`).
 
-**GET** `/forensic-checkpoint/{event_id}` reads forensic state from PostgreSQL. Removal of the legacy `/forensic-checkpoint/falco_alert` stub is follow-up work.
+**GET** `/forensic-checkpoint/{event_id}` reads forensic state from PostgreSQL.
 
 Forensic events optionally link to alerts via `forensic_events.alert_id → alerts.id`.
 

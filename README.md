@@ -128,7 +128,6 @@ curl -X POST http://localhost:8000/alerts/manual \
 | `GET` | `/alerts/` | List all persisted alerts |
 | `PUT` | `/alerts/{alert_id}` | Update an existing alert |
 | `POST` | `/alerts/manual` | Manually trigger a forensic checkpoint |
-| `POST` | `/forensic-checkpoint/falco_alert` | Legacy Falco forensic stub (follow-up) |
 | `GET` | `/forensic-checkpoint/{event_id}` | Retrieve a forensic event by ID |
 | `GET` | `/health` | Health check |
 

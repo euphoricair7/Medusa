@@ -36,7 +36,7 @@ Tracks forensic checkpoint jobs from initial alert reception through CRIU snapsh
 | `namespace` | `TEXT` | YES | Kubernetes namespace of the target pod. |
 | `container_name` | `TEXT` | YES | Specific container within the pod targeted for CRIU checkpointing. |
 | `phase` | `TEXT` | NO | Current lifecycle state of the checkpoint job. Defaults to `pending`. See [API overview](../api/overview.md#forensic-event-lifecycle) for valid values. |
-| `trigger_source` | `TEXT` | YES | How the event was created. `manual` for **POST `/alerts/manual`**; `falco` for Medusa-tagged alerts ingested via **POST `/alerts/falco`**. Legacy `/forensic-checkpoint/falco_alert` also sets `falco`. |
+| `trigger_source` | `TEXT` | YES | How the event was created. `manual` for **POST `/alerts/manual`**; `falco` for Medusa-tagged alerts ingested via **POST `/alerts/falco`**. |
 | `triggered_rule` | `TEXT` | YES | Falco rule name that triggered the event (populated for Falco-sourced events). |
 | `triggered_priority` | `TEXT` | YES | Priority of the triggering alert at creation time. |
 | `checkpoint_location` | `TEXT` | YES | Storage path or URI where the CRIU memory snapshot artifact is stored after a successful checkpoint. |
@@ -81,7 +81,5 @@ A single Falco alert may spawn zero or more forensic checkpoint events. The rela
 **Pod dedup:** When multiple alerts arrive for the same pod while a capture is `queued` or `in_progress`, later alerts reuse the active `forensic_events` row (no second CR). Each alert still gets its own `alerts` row.
 
 **Idempotency:** The shared trigger hashes `alert_id`, namespace, pod, and container into `idempotency_key`. A second request for the same alert returns the existing row when the operator CR is present and phase is `queued`, `in_progress`, or `success`. If the CR was deleted or phase is `failed`, the API recreates the CR on the same row and clears stale `checkpoint_location`.
-
-A legacy `/forensic-checkpoint/falco_alert` endpoint exists but does not create operator CRs and does not use alert-scoped idempotency.
 
 See [`er-diagram.md`](er-diagram.md) for a visual representation of this relationship.

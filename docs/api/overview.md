@@ -86,7 +86,7 @@ Analyst ──▶ POST /alerts/manual ──▶ Alert (create/link) ──▶ fo
                                   GET /forensic-checkpoint/{id} ◀── status sync ◀─────┘
 ```
 
-Both `/alerts/falco` and `/alerts/manual` use the same shared trigger and idempotency semantics below. A legacy **POST** `/forensic-checkpoint/falco_alert` stub exists but does not create operator CRs and does not participate in alert-scoped dedup.
+Both `/alerts/falco` and `/alerts/manual` use the same shared trigger and idempotency semantics below.
 
 ## Idempotency, pod dedup, and CR retry
 
@@ -139,6 +139,5 @@ Unit tests: `tests/api-test/test_idempotency_key.py`, `test_idempotency_dedup.py
 | `POST` | `/alerts/manual`                   | Manually trigger a forensic checkpoint    |
 | `GET`  | `/alerts/`                         | List persisted alerts                     |
 | `PUT`  | `/alerts/{alert_id}`               | Update an existing alert                  |
-| `POST` | `/forensic-checkpoint/falco_alert` | Legacy Falco forensic stub (follow-up)    |
 | `GET`  | `/forensic-checkpoint/{event_id}`  | Retrieve a forensic event by ID           |
 | `GET`  | `/health`                          | Service health check                      |
