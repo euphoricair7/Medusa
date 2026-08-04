@@ -9,10 +9,12 @@ flowchart LR
     Falco["Falco"]
     Analyst["Analyst"]
     AlertsAPI["Alerts API<br/>/alerts/*"]
+    ForensicAPI["Forensic API<br/>/forensic-checkpoint/*"]
     PostgreSQL[("PostgreSQL")]
     K8sCR["ForensicSnapshotChain CR"]
     Operator["checkpoint-restore-operator"]
     Storage["Checkpoint Storage"]
+    Analyzer["Analyzer DaemonSet<br/>planned"]
 
     Falco -->|"POST /alerts/falco"| AlertsAPI
     Analyst -->|"POST /alerts/manual"| AlertsAPI
@@ -20,12 +22,11 @@ flowchart LR
     AlertsAPI -->|"process_trigger_forensic"| K8sCR
     K8sCR --> Operator
     Operator --> Storage
-    Operator -->|"status sync"| PostgreSQL
+    Operator -->|"status sync → raw_report.operator"| PostgreSQL
+    Analyzer -->|"POST .../analysis → raw_report.checkpointctl"| ForensicAPI
+    ForensicAPI --> PostgreSQL
+    Analyst -->|"GET /forensic-checkpoint/{id}"| ForensicAPI
 ```
-
-
-
-
 
 ## Component interaction
 
@@ -33,9 +34,11 @@ flowchart LR
 
 **Analysts** trigger checkpoints via **POST** `/alerts/manual` with explicit Kubernetes context. The API creates or links an alert, writes a `forensic_events` record, and creates a **ForensicSnapshotChain** CR (`criu.org/v1`).
 
-The **checkpoint-restore-operator** reconciles the CR, captures CRIU snapshots to storage, and updates CR status. Medusa polls CR status and maps operator phases back to `forensic_events` (e.g. `Completed` → `success`).
+The **checkpoint-restore-operator** reconciles the CR, captures CRIU snapshots to storage, and updates CR status. Medusa polls CR status and maps operator phases back to `forensic_events` (e.g. `Completed` → `success`), merging into `raw_report.operator` without clearing other keys.
 
-**GET** `/forensic-checkpoint/{event_id}` reads forensic state from PostgreSQL.
+**GET** `/forensic-checkpoint/{event_id}` reads forensic state from PostgreSQL, including `raw_report` when present.
+
+**Analysis ingest:** **POST** `/forensic-checkpoint/{event_id}/analysis` merges checkpointctl output into `raw_report.checkpointctl`. A planned DaemonSet will call this endpoint; Medusa owns the database.
 
 Forensic events optionally link to alerts via `forensic_events.alert_id → alerts.id`.
 
@@ -48,7 +51,7 @@ Falco is the runtime sensor that webhooks alerts to the API. Medusa supports two
 | **Docker Compose** | `falco` service in `docker-compose.yml`, config in `infra/falco/falco.yaml` | `http://api:8000/alerts/falco` (Docker DNS) | Compose `target` container |
 | **Cluster (Helm)** | `scripts/falco-daemonset-setup.sh` | `http://<NODE_IP>:8000/alerts/falco` | Kubernetes pods cluster-wide |
 
-Both load [`infra/falco/rules/medusa_rules.yaml`](../../infra/falco/rules/medusa_rules.yaml). Medusa custom rules carry the `medusa` tag, which gates automatic forensic capture on ingest. Cluster Falco provides `k8s.ns.name` and `k8s.pod.name` in `output_fields` for pod workloads — required for CR creation. Compose Falco against the lab `target` typically lacks pod metadata; alerts are still stored.
+Both load [`infra/falco/rules/medusa_rules.yaml`](../../infra/falco/rules/medusa_rules.yaml). Medusa custom rules carry the `medusa` tag, which gates automatic forensic capture on ingest. Cluster Falco provides `k8s.ns.name` and `k8s.pod.name` in `output_fields` for pod workloads - required for CR creation. Compose Falco against the lab `target` typically lacks pod metadata; alerts are still stored.
 
 See [`docs/installation/falco.md`](../installation/falco.md) for setup, env vars, and troubleshooting. Do not run both Falco installs simultaneously unless you intend to.
 

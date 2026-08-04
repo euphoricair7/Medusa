@@ -41,9 +41,21 @@ Tracks forensic checkpoint jobs from initial alert reception through CRIU snapsh
 | `triggered_priority` | `TEXT` | YES | Priority of the triggering alert at creation time. |
 | `checkpoint_location` | `TEXT` | YES | Storage path or URI where the CRIU memory snapshot artifact is stored after a successful checkpoint. |
 | `raw_alert` | `JSONB` | YES | Original alert payload associated with this event (typically the Falco webhook JSON). |
-| `raw_report` | `JSONB` | YES | Operator status and checkpoint analysis output, updated by the sync loop. |
+| `raw_report` | `JSONB` | YES | Merged forensic payload. Nested keys: `operator` (sync), `checkpointctl` (analysis API), optional `error` (CR create failures). See [raw_report shape](#raw_report-shape). |
 | `idempotency_key` | `TEXT` | YES | SHA-256 of `{alert_id}:{namespace}:{pod_name}:{container_name}`. One forensic event per alert; duplicate submits reuse the row. |
 | `operator_cr_name` | `TEXT` | YES | Name of the `ForensicSnapshotChain` CR in Kubernetes. |
+
+### `raw_report` shape
+
+One JSONB column holds capture status and (later) checkpointctl analysis without writers clobbering each other:
+
+| Key | Writer | Content |
+| --- | ------ | ------- |
+| `operator` | `forensic_sync` CR poll | Operator phase, `snapshot_chain_records`, conditions, optional signed manifest fields |
+| `checkpointctl` | **POST** `/forensic-checkpoint/{event_id}/analysis` | `checkpoint_path`, `node_name`, `analyzer`, `analyzed_at`, `report` |
+| `error` | `forensic_service` on CR create failure | `{"cr_create_error": "..."}`; removed when CR create succeeds on retry |
+
+Sync assigns only `raw_report["operator"]`. The analysis endpoint assigns only `raw_report["checkpointctl"]`. See [API overview](../api/overview.md#raw_report-shape).
 
 ---
 

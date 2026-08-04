@@ -12,7 +12,7 @@ Medusa can run Falco in two ways. Both send alerts to the same API endpoint (**P
 | **K8s metadata** | Limited (Docker target only; no `k8s.pod.name` on lab target) | Full (`k8s.ns.name`, `k8s.pod.name` via container/CRI collector) |
 | **Forensic auto-trigger** | Unlikely (lab target lacks `k8s.pod.name`; non-`medusa` default rules stored only) | Yes, for `medusa`-tagged rules on cluster pods with priority ≥ warning |
 
-**Do not run both at once** unless you intend to — you will get duplicate or confusing alerts.
+**Do not run both at once** unless you intend to - you will get duplicate or confusing alerts.
 
 Shared custom rules live in [`infra/falco/rules/medusa_rules.yaml`](../../infra/falco/rules/medusa_rules.yaml). Both install paths load that file; only the delivery mechanism differs.
 
@@ -26,7 +26,7 @@ Shared custom rules live in [`infra/falco/rules/medusa_rules.yaml`](../../infra/
 
 ---
 
-## Option A — Docker Compose Falco (lab)
+## Option A - Docker Compose Falco (lab)
 
 Best for hacking on the intentional **target** container in compose, without a cluster workload.
 
@@ -64,8 +64,8 @@ Regardless of install path, Falco POSTs to the same endpoint. The API behavior i
    - rule `tags` include `medusa`,
    - `priority` ≥ `warning` (configurable via `MIN_ALERT_PRIORITY`),
    - `k8s.pod.name` is present in `output_fields`.
-3. **Pod dedup** — multiple alerts on the same pod during an active capture reuse one CR.
-4. **Alert idempotency** — resubmitting the same alert row does not create a duplicate CR.
+3. **Pod dedup** - multiple alerts on the same pod during an active capture reuse one CR.
+4. **Alert idempotency** - resubmitting the same alert row does not create a duplicate CR.
 
 Configure the API priority floor in `services/api/config.py` or via the `MIN_ALERT_PRIORITY` environment variable.
 
@@ -79,7 +79,7 @@ docker compose down
 
 ---
 
-## Option B — Cluster Falco (Helm)
+## Option B - Cluster Falco (Helm)
 
 ### Prerequisites
 
