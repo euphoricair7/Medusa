@@ -2,11 +2,12 @@ from sqlalchemy import Column, Text, DateTime, func, ForeignKey, Enum
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
+from db.session import Base
 import uuid
 import enum
 
-from db.session import Base
+
 
 #Enum to track the checkpoint status
 class ForensicCheckpointStatus(enum.Enum):
@@ -47,7 +48,7 @@ class ForensicEvent(Base):
 
     #store raw payloads also for reference
     raw_alert           = Column(JSONB)        # original Falco alert JSON
-    raw_report          = Column(JSONB)        # checkpointctl analysis output
+    raw_report          = Column(JSONB)        # {operator, checkpointctl, error} analysis output
 
     #idempotency key
     idempotency_key = Column(Text, unique=True, nullable=True)
@@ -143,7 +144,29 @@ class ForensicCheckpointResponse(BaseModel):
         default=None,
         description="Name of the operator CR that triggered the forensic checkpointing."
     )
+    raw_report: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Merged forensic report: operator status and checkpointctl analysis"
+    )
 
-
+class ForensicAnalysisRequest(BaseModel):
+    checkpoint_path: str = Field(
+        description="Path to the checkpointed memory artifact."
+    )
+    node_name: Optional[str] = Field(
+        default=None,
+        description="Kubernetes node where the checkpoint was taken."
+    )
+    analyzer: Optional[str] = Field(
+        default="checkpointctl",
+        description="Analyzer used for checkpointctl analysis",
+    )
+    analyzed_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp of when the analysis was completed.",
+    )
+    report: dict[str, Any] = Field(
+        description="Report from the checkpointctl analyzer.",
+    )
 
 

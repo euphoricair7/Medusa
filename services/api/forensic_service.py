@@ -2,6 +2,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from kubernetes.client.rest import ApiException
 from models.forensic import ForensicEvent, ForensicCheckpointStatus
+from config import settings
+import logging
 from forensic_chain import (
     build_forensic_snapshot_chain_body,
     create_forensic_snapshot_chain,
@@ -9,8 +11,7 @@ from forensic_chain import (
     _sanitize_cr_name,
     forensic_snapshot_chain_exists,
 )
-from config import settings
-import logging
+
 
 logger = logging.getLogger(__name__)
 
@@ -91,27 +92,33 @@ async def _submit_forensic_snapshot_chain_cr(
 
     try:
         body = build_forensic_snapshot_chain_body(
-        cr_name=cr_name,
-        target_namespace=namespace,
-        pod_name=pod_name,
-        container_name=container_name,
-        forensic_event_id=str(event.id),
-        burst=burst,
+            cr_name=cr_name,
+            target_namespace=namespace,
+            pod_name=pod_name,
+            container_name=container_name,
+            forensic_event_id=str(event.id),
+            burst=burst,
         )
         created_name = create_forensic_snapshot_chain(body)
         event.operator_cr_name = created_name
         event.phase = ForensicCheckpointStatus.queued.value
-        if isinstance(event.raw_report, dict) and "cr_create_error" in event.raw_report:
-            event.raw_report = None
+        rr = dict(event.raw_report) if isinstance(event.raw_report, dict) else {}
+        rr.pop("error", None)
+        rr.pop("cr_create_error", None)
+        event.raw_report = rr or None
     except ApiException as exc:
         event.phase = ForensicCheckpointStatus.failed.value
-        event.raw_report = {"cr_create_error": str(exc)}
+        rr = dict(event.raw_report) if isinstance(event.raw_report, dict) else {}
+        rr["error"] = {"cr_create_error": str(exc)}
+        event.raw_report = rr
         logger.error("Failed to create forensic snapshot chain: %s", event.id)
         await session.commit()
         raise
     except Exception as exc:
         event.phase = ForensicCheckpointStatus.failed.value
-        event.raw_report = {"cr_create_error": str(exc)}
+        rr = dict(event.raw_report) if isinstance(event.raw_report, dict) else {}
+        rr["error"] = {"cr_create_error": str(exc)}
+        event.raw_report = rr
         raise
 
     await session.commit()

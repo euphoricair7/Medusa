@@ -20,7 +20,7 @@ OPERATOR_TO_MEDUSA = {
 }
 
 #build raw report from forensic snapshot chain
-def _build_raw_report(fsc: dict) -> dict:
+def _build_operator_raw_report(fsc: dict) -> dict:
     """Persist operator status; include manifest/signature fields."""
     status = fsc.get("status") or {}
     report = {
@@ -59,7 +59,7 @@ async def sync_cr_to_db(cr: dict) -> None:
     operator_phase = status.get("phase")
     records = status.get("snapshotChainRecords") or []
     checkpoint_location = _get_checkpoint_location(records)
-    raw_report = _build_raw_report(cr)
+    operator_raw_report = _build_operator_raw_report(cr)
     async with SessionLocal() as session:
         result = await session.execute(
             select(ForensicEvent).where(ForensicEvent.id == uuid.UUID(event_id_str))
@@ -73,7 +73,9 @@ async def sync_cr_to_db(cr: dict) -> None:
         event.updated_at = datetime.now(timezone.utc)
         if checkpoint_location:
             event.checkpoint_location = checkpoint_location
-        event.raw_report = raw_report
+        rr = dict(event.raw_report) if isinstance(event.raw_report, dict) else {}
+        rr["operator"] = operator_raw_report
+        event.raw_report = rr
         if metadata.get("name"):
             event.operator_cr_name = metadata["name"]
         await session.commit()
