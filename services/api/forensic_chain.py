@@ -1,10 +1,9 @@
 import hashlib
 import re
-from datetime import datetime, timezone
 from kubernetes.client.rest import ApiException
 from k8s.client import get_k8s_client, FSC_GROUP, FSC_VERSION, MEDUSA_MANAGED_LABEL, MEDUSA_MANAGED_VALUE
 from config import settings
-
+import uuid
 
 def _sanitize_cr_name(event_id: str, rule: str) -> str:
     suffix = event_id.replace("-", "")[:8]
@@ -70,7 +69,16 @@ def create_forensic_snapshot_chain(body: dict) -> str:
     created = k8s.create_forensic_snapshot_chain(ns, body)
     return created["metadata"]["name"]
 
-def make_idempotency_key(namespace: str, pod_name: str, rule: str, window_seconds: int) -> str:
-    bucket = int(datetime.now(timezone.utc).timestamp()) // window_seconds
-    raw = f"{namespace}:{pod_name}:{rule}:{bucket}"
+def make_idempotency_key(alert_id: uuid.UUID, namespace: str, pod_name: str, container_name: str | None,) -> str:
+    raw = f"{alert_id}:{namespace}:{pod_name}:{container_name or ''}"
     return hashlib.sha256(raw.encode()).hexdigest()
+
+def forensic_snapshot_chain_exists(namespace: str, chain_cr_name: str) -> bool:
+  k8s = get_k8s_client()
+  try:
+    k8s.get_forensic_snapshot_chain(namespace, chain_cr_name)
+    return True
+  except ApiException as e:
+    if e.status == 404:
+      return False
+    raise

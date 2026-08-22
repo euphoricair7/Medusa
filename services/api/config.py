@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     fsc_default_max_duration: str = "2m"
     fsc_integrity_algorithm: str = "sha256"
     min_alert_priority: str = "warning"
-    idempotency_window_seconds: int = 60
+
 
     # host path inside kubelet to path inside medusa-api container
     checkpoint_host_prefix: str = "/var/lib/kubelet/checkpoints"

@@ -33,14 +33,14 @@ Tracks forensic checkpoint jobs from initial alert reception through CRIU snapsh
 | `pod_name` | `TEXT` | YES | Kubernetes pod hosting the target container. Populated for manual triggers or by the checkpoint pipeline. |
 | `namespace` | `TEXT` | YES | Kubernetes namespace of the target pod. |
 | `container_name` | `TEXT` | YES | Specific container within the pod targeted for CRIU checkpointing. |
-| `phase` | `TEXT` | NO | Current lifecycle state of the checkpoint job. Defaults to `pending`. See [API overview](../api/overview.md#forensic-event-lifecycle-states) for valid values. |
-| `trigger_source` | `TEXT` | YES | How the event was created: `falco` (automatic webhook) or `manual` (analyst-initiated). |
+| `phase` | `TEXT` | NO | Current lifecycle state of the checkpoint job. Defaults to `pending`. See [API overview](../api/overview.md#forensic-event-lifecycle) for valid values. |
+| `trigger_source` | `TEXT` | YES | How the event was created. Manual triggers set `manual`. Falco webhook ingest via `/alerts/falco` may leave this `NULL` until explicitly wired. Legacy `/forensic-checkpoint/falco_alert` sets `falco`. |
 | `triggered_rule` | `TEXT` | YES | Falco rule name that triggered the event (populated for Falco-sourced events). |
 | `triggered_priority` | `TEXT` | YES | Priority of the triggering alert at creation time. |
 | `checkpoint_location` | `TEXT` | YES | Storage path or URI where the CRIU memory snapshot artifact is stored after a successful checkpoint. |
 | `raw_alert` | `JSONB` | YES | Original alert payload associated with this event (typically the Falco webhook JSON). |
 | `raw_report` | `JSONB` | YES | Operator status and checkpoint analysis output, updated by the sync loop. |
-| `idempotency_key` | `TEXT` | YES | Unique hash deduplicating triggers within a configurable time window. |
+| `idempotency_key` | `TEXT` | YES | SHA-256 of `{alert_id}:{namespace}:{pod_name}:{container_name}`. One forensic event per alert; duplicate submits reuse the row. |
 | `operator_cr_name` | `TEXT` | YES | Name of the `ForensicSnapshotChain` CR in Kubernetes. |
 
 ---
@@ -54,7 +54,7 @@ Defined in [`01_schema.sql`](../../infra/postgres/init/01_schema.sql):
 | `idx_alerts_received_at` | `alerts` | Time-range listing (`GET /alerts/`) |
 | `idx_alerts_priority` | `alerts` | Severity filtering |
 | `idx_alerts_container` | `alerts` | Container-scoped lookups |
-| `idempotency_key` (UNIQUE) | `forensic_events` | Dedup lookups in shared trigger logic |
+| `idempotency_key` (UNIQUE) | `forensic_events` | Alert-scoped dedup in `process_trigger_forensic` |
 
 No other indexes on `forensic_events` yet. Add them if query patterns require (e.g. filtering by `phase`).
 
@@ -72,6 +72,10 @@ A single Falco alert may spawn zero or more forensic checkpoint events. The rela
 
 **Manual flow:** **POST `/alerts/manual`** creates a new alert when `alert_id` is omitted, or links an existing alert when supplied.
 
-**Automatic flow (planned):** Falco alerts via `/alerts/falco` will use the same shared forensic trigger. A legacy `/forensic-checkpoint/falco_alert` endpoint exists but does not create operator CRs.
+**Automatic flow:** **POST `/alerts/falco`** persists the alert, then calls the same shared forensic trigger when Kubernetes context is present in the Falco payload and priority meets the threshold. Ingestion succeeds even if forensic triggering fails.
+
+**Idempotency:** The shared trigger hashes `alert_id`, namespace, pod, and container into `idempotency_key`. A second request for the same alert returns the existing row when the operator CR is present and phase is `queued`, `in_progress`, or `success`. If the CR was deleted or phase is `failed`, the API recreates the CR on the same row and clears stale `checkpoint_location`.
+
+A legacy `/forensic-checkpoint/falco_alert` endpoint exists but does not create operator CRs and does not use alert-scoped idempotency.
 
 See [`er-diagram.md`](er-diagram.md) for a visual representation of this relationship.
