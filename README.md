@@ -17,14 +17,19 @@ Medusa/
 ├── docs/
 │   ├── api/overview.md
 │   ├── architecture/overview.md
+│   ├── installation/
+│   │   └── falco.md                # Docker vs Helm Falco install guide
 │   └── database/
 │       ├── schema.md
 │       └── er-diagram.md
 ├── infra/
 │   ├── falco/
-│   │   ├── falco.yaml              # webhook → POST /alerts/falco
-│   │   └── rules/medusa_rules.yaml
+│   │   ├── falco.yaml              # Docker Compose Falco only → POST /alerts/falco
+│   │   └── rules/medusa_rules.yaml # shared rules (compose + Helm)
 │   └── postgres/init/01_schema.sql
+├── scripts/
+│   ├── falco-daemonset-setup.sh    # Helm install for cluster Falco
+│   └── .env.example
 └── services/
     ├── api/                        # FastAPI backend
     │   ├── main.py
@@ -80,6 +85,19 @@ curl http://localhost:8000/alerts/
 ```
 
 The `/ping` endpoint is intentionally vulnerable: the `;id` suffix runs shell injection as root. `ping` may be missing in the target image (`ping: not found` in stderr is normal); Falco still detects the spawned shell.
+
+### Falco: Docker Compose vs cluster (Helm)
+
+Medusa supports two Falco deployments. Both post to **POST** `/alerts/falco`; pick one based on what you want to monitor.
+
+| Mode | Command | Monitors |
+|------|---------|----------|
+| **Docker Compose** (lab) | `docker compose up` includes the `falco` service | Compose `target` container via Docker socket |
+| **Cluster** (Helm) | `scripts/falco-daemonset-setup.sh` | Pods in your Kubernetes cluster |
+
+Use **cluster Falco** for the full pipeline (k8s context in alerts, automatic forensic CRs on cluster pods). Use **compose Falco** for local lab demos against the vulnerable target.
+
+When using cluster Falco, start only `api` and `postgres` from compose (omit the `falco` service). See [`docs/installation/falco.md`](docs/installation/falco.md) for install steps, env vars, and troubleshooting.
 
 ### Docker lab networking
 
