@@ -52,9 +52,14 @@ services:
       context: ./services/api
     container_name: medusa-api
     hostname: api
-    network_mode: host
+    networks:
+      - lab-net
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://medusa:${POSTGRES_PASSWORD:-medusa}@127.0.0.1:5432/medusa
+      - DATABASE_URL=postgresql+asyncpg://medusa:${POSTGRES_PASSWORD:-medusa}@postgres:5432/medusa
       - KUBECONFIG_PATH=/kube/config
       - K8S_IN_CLUSTER=false
       - CHECKPOINT_HOST_PATH=/checkpoints
