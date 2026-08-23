@@ -13,11 +13,13 @@ from forensic_service import _submit_forensic_snapshot_chain_cr
 @patch("forensic_service.forensic_snapshot_chain_exists", return_value=False)
 @patch("forensic_service._submit_forensic_snapshot_chain_cr", new_callable=AsyncMock)
 @patch("forensic_service.find_by_idempotency_key", new_callable=AsyncMock)
-async def test_deleted_cr(mock_find, mock_submit, mock_exists):
+@patch("forensic_service.find_active_forensic_for_pod", new_callable=AsyncMock)
+async def test_deleted_cr(mock_find_active, mock_find, mock_submit, mock_exists):
     """
     Test that a deleted CR is recreated on the same row if the same idempotency key is used.
     """
     existing = make_event(phase=ForensicCheckpointStatus.success.value, cr_name="fsc-old")
+    mock_find_active.return_value = None
     mock_find.return_value = existing
     mock_submit.return_value = existing
 
@@ -40,11 +42,13 @@ async def test_deleted_cr(mock_find, mock_submit, mock_exists):
 @patch("forensic_service.forensic_snapshot_chain_exists", return_value=True)
 @patch("forensic_service._submit_forensic_snapshot_chain_cr", new_callable=AsyncMock)
 @patch("forensic_service.find_by_idempotency_key", new_callable=AsyncMock)
-async def test_failed_phase_retry(mock_find, mock_submit, mock_exists):
+@patch("forensic_service.find_active_forensic_for_pod", new_callable=AsyncMock)
+async def test_failed_phase_retry(mock_find_active, mock_find, mock_submit, mock_exists):
     """
     Test that a failed phase is retried if the same idempotency key is used.
     """
     existing = make_event(phase=ForensicCheckpointStatus.failed.value)
+    mock_find_active.return_value = None
     mock_find.return_value = existing
 
     await process_trigger_forensic(
@@ -65,11 +69,13 @@ async def test_failed_phase_retry(mock_find, mock_submit, mock_exists):
 @patch("forensic_service.forensic_snapshot_chain_exists", return_value=False)
 @patch("forensic_service._submit_forensic_snapshot_chain_cr", new_callable=AsyncMock)
 @patch("forensic_service.find_by_idempotency_key", new_callable=AsyncMock)
-async def test_queued_phase(mock_find, mock_submit, mock_exists):
+@patch("forensic_service.find_active_forensic_for_pod", new_callable=AsyncMock)
+async def test_queued_phase(mock_find_active, mock_find, mock_submit, mock_exists):
     """
     Test that a queued phase is retried if the same idempotency key is used.
     """
     existing = make_event(phase=ForensicCheckpointStatus.queued.value, cr_name="fsc-gone")
+    mock_find_active.return_value = None
     mock_find.return_value = existing
     mock_submit.return_value = existing
 
@@ -116,4 +122,3 @@ async def test_failed_phase_clear_error(mock_build, mock_create):
 
     assert event.raw_report is None
     assert event.phase == ForensicCheckpointStatus.queued.value
-

@@ -16,17 +16,34 @@ logger = logging.getLogger(__name__)
 
 ALERT_PRIORITY = ["critical", "error", "warning", "notice", "info", "debug"]
 
+_ACTIVE_FORENSIC_PHASES = (
+    ForensicCheckpointStatus.queued.value,
+    ForensicCheckpointStatus.in_progress.value,
+)
+
+class MissingK8sContextError(ValueError):
+    """Falco payload lacks required Kubernetes fields in output_fields."""
+
 def priority_ok(priority: str) -> bool:
     p = priority.lower()
     return p in ALERT_PRIORITY and ALERT_PRIORITY.index(p) <= ALERT_PRIORITY.index(settings.min_alert_priority)
 
 def extract_k8s_context(raw_alert: dict) -> tuple[str, str, str | None]:
     fields = raw_alert.get("output_fields") or {}
-    namespace = fields.get("k8s.ns.name") or fields.get("namespace") or "default"
-    pod_name = fields.get("k8s.pod.name") or fields.get("pod.name")
+    namespace = (
+        fields.get("k8s.ns.name") 
+        or fields.get("k8smeta.ns.name") 
+        or fields.get("namespace") 
+        or "default"
+    )
+    pod_name = (
+        fields.get("k8s.pod.name") 
+        or fields.get("k8smeta.pod.name") 
+        or fields.get("pod.name")
+    )
     container_name = fields.get("container.name") or fields.get("k8s.container.name")
     if not pod_name:
-        raise ValueError("missing k8s.pod.name in Falco output_fields")
+        raise MissingK8sContextError("missing k8s.pod.name in Falco output_fields")
     return namespace, pod_name, container_name
 
 async def find_by_idempotency_key(session: AsyncSession, key: str) -> ForensicEvent | None:
@@ -34,6 +51,27 @@ async def find_by_idempotency_key(session: AsyncSession, key: str) -> ForensicEv
         select(ForensicEvent).where(ForensicEvent.idempotency_key == key)
     )
     return result.scalars().first()
+
+async def find_active_forensic_for_pod(
+    session: AsyncSession,
+    *,
+    namespace: str,
+    pod_name: str,
+    container_name: str | None,
+) -> ForensicEvent | None:
+    result = await session.execute(
+        select(ForensicEvent).where(
+            ForensicEvent.namespace == namespace,
+            ForensicEvent.pod_name == pod_name,
+            ForensicEvent.container_name == container_name,
+            ForensicEvent.phase.in_(_ACTIVE_FORENSIC_PHASES),
+        )
+    )
+    for event in result.scalars().all():
+        cr_name = event.operator_cr_name
+        if cr_name and forensic_snapshot_chain_exists(settings.fsc_cr_namespace, cr_name):
+            return event
+    return None
 
 #Submit the forensic snapshot chain CR
 #for a new or existing event
@@ -50,15 +88,16 @@ async def _submit_forensic_snapshot_chain_cr(
     cr_name = _sanitize_cr_name(str(event.id), rule)
     burst = priority.lower() in ("critical", "error")
 
-    body = build_forensic_snapshot_chain_body(
+
+    try:
+        body = build_forensic_snapshot_chain_body(
         cr_name=cr_name,
         target_namespace=namespace,
         pod_name=pod_name,
         container_name=container_name,
         forensic_event_id=str(event.id),
         burst=burst,
-    )
-    try:
+        )
         created_name = create_forensic_snapshot_chain(body)
         event.operator_cr_name = created_name
         event.phase = ForensicCheckpointStatus.queued.value
@@ -106,6 +145,16 @@ async def process_trigger_forensic(
     else:
         raise ValueError("missing kubernetes context")
 
+    active = await find_active_forensic_for_pod(
+    session,
+    namespace=namespace,
+    pod_name=pod_name,
+    container_name=container_name,
+    )
+
+    if active is not None:
+        return active
+        
     idem_key = make_idempotency_key(alert_id, namespace, pod_name, container_name)
 
     existing = await find_by_idempotency_key(session, idem_key)

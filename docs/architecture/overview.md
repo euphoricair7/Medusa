@@ -29,13 +29,13 @@ flowchart LR
 
 ## Component interaction
 
-**Falco** sends runtime alerts to **POST** `/alerts/falco`, which persists them in the `alerts` table and runs the shared forensic trigger when the payload includes Kubernetes context and priority meets the threshold.
+**Falco** sends runtime alerts to **POST** `/alerts/falco`. The API **always** persists them in the `alerts` table. For Medusa-tagged rules (`tags` includes `medusa`) with Kubernetes context (`k8s.pod.name` in `output_fields`) and priority at or above the configured threshold (default `warning`), it runs the shared forensic trigger (`process_trigger_forensic`, `trigger_source=falco`). Pod-level dedup prevents duplicate CRs while a capture is in flight on the same pod; alert-scoped idempotency prevents duplicate CRs when the same alert row is resubmitted.
 
 **Analysts** trigger checkpoints via **POST** `/alerts/manual` with explicit Kubernetes context. The API creates or links an alert, writes a `forensic_events` record, and creates a **ForensicSnapshotChain** CR (`criu.org/v1`).
 
 The **checkpoint-restore-operator** reconciles the CR, captures CRIU snapshots to storage, and updates CR status. Medusa polls CR status and maps operator phases back to `forensic_events` (e.g. `Completed` → `success`).
 
-**GET** `/forensic-checkpoint/{event_id}` reads forensic state from PostgreSQL. Removal of the legacy `/forensic-checkpoint/falco_alert` stub is follow-up work.
+**GET** `/forensic-checkpoint/{event_id}` reads forensic state from PostgreSQL.
 
 Forensic events optionally link to alerts via `forensic_events.alert_id → alerts.id`.
 
@@ -48,7 +48,7 @@ Falco is the runtime sensor that webhooks alerts to the API. Medusa supports two
 | **Docker Compose** | `falco` service in `docker-compose.yml`, config in `infra/falco/falco.yaml` | `http://api:8000/alerts/falco` (Docker DNS) | Compose `target` container |
 | **Cluster (Helm)** | `scripts/falco-daemonset-setup.sh` | `http://<NODE_IP>:8000/alerts/falco` | Kubernetes pods cluster-wide |
 
-Both load [`infra/falco/rules/medusa_rules.yaml`](../../infra/falco/rules/medusa_rules.yaml). Automatic forensic capture on Falco ingest requires Kubernetes context in the alert payload (`k8s.pod.name` in `output_fields`), which cluster Falco provides for pod workloads.
+Both load [`infra/falco/rules/medusa_rules.yaml`](../../infra/falco/rules/medusa_rules.yaml). Medusa custom rules carry the `medusa` tag, which gates automatic forensic capture on ingest. Cluster Falco provides `k8s.ns.name` and `k8s.pod.name` in `output_fields` for pod workloads — required for CR creation. Compose Falco against the lab `target` typically lacks pod metadata; alerts are still stored.
 
 See [`docs/installation/falco.md`](../installation/falco.md) for setup, env vars, and troubleshooting. Do not run both Falco installs simultaneously unless you intend to.
 

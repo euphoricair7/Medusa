@@ -12,11 +12,13 @@ from helpers import make_event
 @patch("forensic_service.forensic_snapshot_chain_exists", return_value=True)
 @patch("forensic_service._submit_forensic_snapshot_chain_cr", new_callable=AsyncMock)
 @patch("forensic_service.find_by_idempotency_key", new_callable=AsyncMock)
-async def test_duplicate_alert(mock_find, mock_submit, mock_exists):
+@patch("forensic_service.find_active_forensic_for_pod", new_callable=AsyncMock)
+async def test_duplicate_alert(mock_find_active, mock_find, mock_submit, mock_exists):
     """
     Test that a duplicate alert returns the existing event.
     """
     existing = make_event(phase=ForensicCheckpointStatus.queued.value)
+    mock_find_active.return_value = None
     mock_find.return_value = existing
 
     result = await process_trigger_forensic(
@@ -37,10 +39,12 @@ async def test_duplicate_alert(mock_find, mock_submit, mock_exists):
 @pytest.mark.asyncio
 @patch("forensic_service._submit_forensic_snapshot_chain_cr", new_callable=AsyncMock)
 @patch("forensic_service.find_by_idempotency_key", new_callable=AsyncMock)
-async def test_new_alert(mock_find, mock_submit):
+@patch("forensic_service.find_active_forensic_for_pod", new_callable=AsyncMock)
+async def test_new_alert(mock_find_active, mock_find, mock_submit):
     """
     Test that a new alert creates a row and then creates a CR.
     """
+    mock_find_active.return_value = None
     mock_find.return_value = None
     mock_submit.return_value = make_event(phase=ForensicCheckpointStatus.queued.value)
 
@@ -66,10 +70,12 @@ async def test_new_alert(mock_find, mock_submit):
 @pytest.mark.asyncio
 @patch("forensic_service._submit_forensic_snapshot_chain_cr", new_callable=AsyncMock)
 @patch("forensic_service.find_by_idempotency_key", new_callable=AsyncMock)
-async def test_two_alerts(mock_find, mock_submit):
+@patch("forensic_service.find_active_forensic_for_pod", new_callable=AsyncMock)
+async def test_two_alerts(mock_find_active, mock_find, mock_submit):
     """
     Test that two alerts for the same pod create two events.
     """
+    mock_find_active.return_value = None
     mock_find.return_value = None
     mock_submit.side_effect = lambda _session, **kwargs: kwargs["event"]
 

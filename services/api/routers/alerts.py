@@ -1,6 +1,6 @@
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends
 from kubernetes.client.rest import ApiException
@@ -8,7 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_db
-from forensic_service import process_trigger_forensic
+from forensic_service import (
+    MissingK8sContextError,
+    process_trigger_forensic,
+    extract_k8s_context,
+)
 from models.alert import Alert, AlertOut
 from models.forensic import (
     ForensicCheckpointManualRequest,
@@ -19,6 +23,14 @@ from models.forensic import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _k8s_fields_from_falco(alert: dict) -> tuple[str | None, str | None]:
+    try:
+        namespace, pod_name, _ = extract_k8s_context(alert)
+        return namespace, pod_name
+    except ValueError:
+        return None, None
 
 
 async def _ingest_alert(
@@ -72,7 +84,9 @@ async def _ingest_alert(
     response_description="Array of normalized alert records.",
 )
 async def get_alerts(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Alert))
+    result = await db.execute(
+        select(Alert).order_by(Alert.received_at.desc())
+    )
     alerts = result.scalars().all()
     return alerts
 
@@ -88,41 +102,113 @@ async def get_alerts(db: AsyncSession = Depends(get_db)):
     responses={200: {"description": "Alert successfully ingested."}},
 )
 async def create_falco_alert(alert: dict, db: AsyncSession = Depends(get_db)):
+    fields = alert.get("output_fields") or {}
+    namespace, pod_name = _k8s_fields_from_falco(alert)
 
-    # storing in the db
     new_alert = Alert(
         received_at=datetime.utcnow(),
         rule=alert.get("rule", ""),
         priority=alert.get("priority", ""),
         output=alert.get("output", ""),
         container_name=alert.get("output_fields", {}).get("container.name"),
+        namespace=namespace,
+        pod_name=pod_name,
         image=alert.get("output_fields", {}).get("container.image.repository"),
         tags=alert.get("tags"),
-        raw_event=alert
+        raw_event=alert,
     )
-    db.add(new_alert)
-    print("committing")
-    await db.commit()
-    print("committed")
-    await db.refresh(new_alert)
 
     try:
-        await process_trigger_forensic(
+        tags = alert.get("tags") or []
+        if "medusa" not in tags:
+            db.add(new_alert)
+            await db.commit()
+            await db.refresh(new_alert)
+            logger.info(
+                "Falco alert saved (id=%s) forensic skipped, not a medusa-tagged alert",
+                new_alert.id,
+            )
+            return {"status": "ok"}
+        saved_alert, event = await _ingest_alert(
             db,
-            alert_id=new_alert.id,
+            trigger_source="falco",
             rule=new_alert.rule,
             priority=new_alert.priority,
-            raw_event=alert,
+            raw_alert=alert,
+            new_alert=new_alert,
         )
-    except ValueError:
-        pass  # no k8s context, alert saved, no CR
-    except Exception as e:
-        # log but dont fail alert ingestions
-        print(f"Error triggering forensic: {e}")
+    except MissingK8sContextError as e:
+        logger.error(
+            "Falco alert saved (id=%s) but missing Kubernetes context: %s",
+            new_alert.id,
+            e,
+        )
+        return {"status": "ok"}
+    except ValueError as e:
+        logger.warning(
+            "Falco alert saved (id=%s) forensic skipped: %s",
+            new_alert.id,
+            e,
+        )
+        return {"status": "ok"}
+    except ApiException as e:
+        logger.error(
+            "Falco alert saved (id=%s) but forensic CR creation failed: status=%s reason=%s",
+            new_alert.id,
+            e.status,
+            e.reason,
+        )
+        return {"status": "ok"}
+    except Exception:
+        logger.exception(
+            "Falco alert saved (id=%s) but forensic trigger failed",
+            new_alert.id,
+        )
+        return {"status": "ok"}
 
-    print(f"Received Falco alert: {alert}")
+    if event is None:
+        logger.info(
+            "Falco alert saved (id=%s) forensic skipped, priority %r below threshold",
+            saved_alert.id,
+            saved_alert.priority,
+        )
+    elif event.alert_id != saved_alert.id:
+        logger.info(
+        "Falco alert saved (id=%s) forensic pod-dedup — reusing event_id=%s "
+        "(owned by alert_id=%s) phase=%s operator_cr=%s",
+        saved_alert.id,
+        event.id,
+        event.alert_id,
+        event.phase,
+        event.operator_cr_name,
+        )
+    elif _forensic_event_is_reused(event):
+        logger.info(
+            "Falco alert saved (id=%s) forensic alert-dedup, reusing event_id=%s phase=%s operator_cr=%s",
+            saved_alert.id,
+            event.id,
+            event.phase,
+            event.operator_cr_name,
+        )
+    else:
+        logger.info(
+            "Falco alert saved (id=%s) forensic queued event_id=%s operator_cr=%s",
+            saved_alert.id,
+            event.id,
+            event.operator_cr_name,
+        )
 
     return {"status": "ok"}
+
+
+def _forensic_event_is_reused(event: ForensicEvent) -> bool:
+    """True when the event row predates this request (idempotency reuse)."""
+    if event.created_at is None:
+        return False
+    created = event.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - created > timedelta(seconds=2)
 
 
 @router.post(
@@ -179,6 +265,8 @@ async def create_manual_alert(
                     f"Manual checkpoint: {request.namespace}/"
                     f"{request.pod_name}/{request.container_name}"
                 ),
+                namespace=request.namespace,
+                pod_name=request.pod_name,
                 container_name=request.container_name,
                 raw_event={**request.model_dump(mode="json"), "source": "manual"},
             )

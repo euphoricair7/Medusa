@@ -14,24 +14,57 @@ The live OpenAPI schema is served at `http://localhost:8000/openapi.json` when t
 
 ## Alert ingestion (Falco)
 
-1. **Falco** detects a rule match and emits JSON via its HTTP webhook.
-2. Falco posts to **POST** `/alerts/falco`. The webhook URL depends on the install:
-   - **Docker Compose Falco:** `http://api:8000/alerts/falco` (`infra/falco/falco.yaml`, `lab-net` DNS).
-   - **Cluster Falco (Helm):** `http://<NODE_IP>:8000/alerts/falco` (configured by `scripts/falco-daemonset-setup.sh`; must be reachable from Falco pods).
-3. The API normalizes the payload and stores it in PostgreSQL (`alerts` table).
-4. When the alert includes Kubernetes context in `output_fields` (e.g. `k8s.pod.name`) and priority meets the configured threshold, the API runs the shared forensic trigger (`process_trigger_forensic`) for the new alert row. Forensic errors are logged but do not fail ingestion — the endpoint still returns `{"status": "ok"}`.
+**POST** `/alerts/falco` is the standard Falco integration. Every webhook payload is persisted to the `alerts` table for auditing, listing, and correlation. The API then evaluates whether that alert should also trigger a checkpoint via the shared forensic pipeline.
 
-See [`docs/installation/falco.md`](../installation/falco.md) for install steps and the Docker vs Helm distinction.
+### Webhook URL (dev vs prod)
+
+| Environment | Falco install | Webhook URL |
+| ----------- | ------------- | ----------- |
+| **Local lab** | Docker Compose (`falco` service) | `http://api:8000/alerts/falco` — Docker DNS on `medusa-lab-net` (`infra/falco/falco.yaml`) |
+| **Cluster / production** | Helm DaemonSet (`scripts/falco-daemonset-setup.sh`) | `http://<NODE_IP>:8000/alerts/falco` — node IP must be reachable from Falco pods |
+
+See [`docs/installation/falco.md`](../installation/falco.md) for install steps. Do not run both Falco installs at once unless you intend to.
+
+### Ingestion flow
+
+1. **Falco** detects a rule match and POSTs the raw JSON webhook.
+2. The API normalizes fields (`rule`, `priority`, `output`, `container_name`, `namespace`, `pod_name`, `tags`, `raw_event`) and **always** persists a new `alerts` row.
+3. Forensic triggering runs only when **all** of the following hold:
+   - **`medusa` tag present** — `"medusa"` must appear in the Falco rule's `tags` array. Alerts from default Falco rules (no `medusa` tag) are stored only; no checkpoint is attempted.
+   - **Priority ≥ threshold** — default minimum is `warning` (`MIN_ALERT_PRIORITY` in API config; see `services/api/config.py`).
+   - **Kubernetes pod context** — `k8s.pod.name` (or `k8smeta.pod.name` / `pod.name` fallback) in `output_fields`. Missing context is logged; ingestion still succeeds.
+4. When eligible, the API calls `process_trigger_forensic` with `trigger_source=falco`, creates or reuses a `forensic_events` row, and submits a **ForensicSnapshotChain** CR to Kubernetes.
+5. The endpoint **always** returns `{"status": "ok"}` — forensic errors (missing k8s context, CR creation failure, low priority) are logged but do not fail ingestion.
 
 ```
-Falco ──webhook──▶ POST /alerts/falco ──▶ PostgreSQL (alerts)
+Falco ──webhook──▶ POST /alerts/falco ──▶ PostgreSQL (alerts)  [always]
                                               │
+                         medusa tag + priority + k8s.pod.name?
+                                              │ yes
                                               ▼
                                       process_trigger_forensic
                                               │
+                         ┌────────────────────┼────────────────────┐
+                         ▼                    ▼                    ▼
+                  pod dedup (active)   alert idempotency    new event + CR
+                         │                    │                    │
+                         └────────────────────┴────────────────────┘
                                               ▼
-                             ForensicSnapshotChain CR (when k8s context present)
+                             ForensicSnapshotChain CR (default namespace)
 ```
+
+### Acceptance criteria (Falco pipeline)
+
+| Scenario | Expected behavior |
+| -------- | ----------------- |
+| Medusa-tagged alert, k8s metadata, priority ≥ warning | Alert saved **and** `ForensicSnapshotChain` CR created |
+| Alert without `k8s.pod.name` | Alert saved; no CR; `200 {"status": "ok"}` |
+| Low-priority alert (below `MIN_ALERT_PRIORITY`) | Alert saved; no CR |
+| Same alert row resubmitted (same `alert_id`) | No duplicate CR — alert-scoped idempotency reuses `forensic_events` row |
+| Burst of syscalls on same pod (distinct `alert_id`s) | One active CR per pod while phase is `queued` or `in_progress` — pod dedup reuses the in-flight event |
+| Non-`medusa` Falco rule | Alert saved; forensic skipped |
+
+`GET /alerts/` returns all persisted alerts ordered by `received_at` descending. Normalized `namespace` and `pod_name` columns are populated from `output_fields` when present.
 
 ## Manual forensic checkpoint
 
@@ -53,11 +86,26 @@ Analyst ──▶ POST /alerts/manual ──▶ Alert (create/link) ──▶ fo
                                   GET /forensic-checkpoint/{id} ◀── status sync ◀─────┘
 ```
 
-Both `/alerts/falco` and `/alerts/manual` use the same shared trigger and idempotency semantics below. A legacy **POST** `/forensic-checkpoint/falco_alert` stub exists but does not create operator CRs and does not participate in alert-scoped dedup.
+Both `/alerts/falco` and `/alerts/manual` use the same shared trigger and idempotency semantics below.
 
-## Idempotency and CR retry
+## Idempotency, pod dedup, and CR retry
 
-Forensic triggers are deduplicated per alert row, not by time bucket:
+Both `/alerts/falco` and `/alerts/manual` use `process_trigger_forensic`. Dedup happens in two layers:
+
+### Pod dedup (cross-alert)
+
+Before creating a new forensic event, the API checks for an **active** event on the same `(namespace, pod_name, container_name)` where:
+
+- `phase` is `queued` or `in_progress`, **and**
+- the linked `ForensicSnapshotChain` CR still exists in the cluster.
+
+If found, that existing `forensic_events` row is returned. A **new alert row is still created**; the returned event may reference an earlier `alert_id`. This prevents duplicate CRs when one syscall burst produces many Falco alerts on the same pod.
+
+After a capture completes (`success`) or fails (`failed`), a new alert on the same pod can create a new forensic event and CR.
+
+### Alert-scoped idempotency
+
+When no active pod-level capture exists, the API keys forensic rows per alert:
 
 ```
 idempotency_key = sha256("{alert_id}:{namespace}:{pod_name}:{container_name}")
@@ -65,9 +113,10 @@ idempotency_key = sha256("{alert_id}:{namespace}:{pod_name}:{container_name}")
 
 | Situation | Behavior |
 | --------- | -------- |
-| Same `alert_id` resubmitted, CR exists, phase `queued` / `in_progress` / `success` | Return existing forensic event |
+| Same `alert_id` resubmitted, CR exists, phase `queued` / `in_progress` / `success` | Return existing forensic event (no duplicate CR) |
 | CR deleted from cluster, or phase `failed` | Recreate `ForensicSnapshotChain` on the same DB row; reset `checkpoint_location` |
-| Two different alerts, same pod within seconds | Two distinct forensic events (distinct `alert_id`) |
+| New `alert_id`, same pod, active capture already running | Pod dedup — return existing in-flight event |
+| New `alert_id`, same pod, prior capture `success` or `failed` | New forensic event and CR |
 
 Unit tests: `tests/api-test/test_idempotency_key.py`, `test_idempotency_dedup.py`, `test_forensic_cr_retry.py`.
 
@@ -86,10 +135,9 @@ Unit tests: `tests/api-test/test_idempotency_key.py`, `test_idempotency_dedup.py
 
 | Method | Path                               | Purpose                                   |
 | ------ | ---------------------------------- | ----------------------------------------- |
-| `POST` | `/alerts/falco`                    | Ingest a Falco webhook alert; triggers forensic capture when k8s context is present |
+| `POST` | `/alerts/falco`                    | Ingest a Falco webhook alert; triggers forensic capture when `medusa` tag, k8s context, and priority threshold are met |
 | `POST` | `/alerts/manual`                   | Manually trigger a forensic checkpoint    |
 | `GET`  | `/alerts/`                         | List persisted alerts                     |
 | `PUT`  | `/alerts/{alert_id}`               | Update an existing alert                  |
-| `POST` | `/forensic-checkpoint/falco_alert` | Legacy Falco forensic stub (follow-up)    |
 | `GET`  | `/forensic-checkpoint/{event_id}`  | Retrieve a forensic event by ID           |
 | `GET`  | `/health`                          | Service health check                      |
