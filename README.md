@@ -6,7 +6,7 @@ Medusa detects attacks on containerised workloads using Falco, automatically cap
 
 ---
 
-## Current state — v1
+## Current state - v1
 
 v1 is the minimal working foundation: a vulnerable target container monitored by Falco, with alerts persisted to PostgreSQL via a FastAPI backend. Falco webhook ingestion and manual analyst triggers both run the shared forensic pipeline (`process_trigger_forensic`) to create CRIU checkpoint capture jobs via the checkpoint-restore-operator.
 
@@ -44,7 +44,7 @@ Medusa/
     │   │   └── forensic.py
     │   └── routers/
     │       ├── alerts.py           # /alerts/falco, /alerts/manual
-    │       └── forensic.py         # GET /forensic-checkpoint/{id}
+    │       └── forensic.py         # GET /forensic-checkpoint/{id}, POST .../analysis
     └── target/                     # intentionally vulnerable app
         └── app/
 ```
@@ -63,7 +63,8 @@ Medusa/
 1. **target** runs a FastAPI app with intentional vulnerabilities (command injection, path traversal, weak SSH).
 2. **falco** monitors syscalls via eBPF and sends alerts to **POST `/alerts/falco`**.
 3. **api** persists every Falco alert, then runs the shared forensic trigger when the rule has the `medusa` tag, k8s pod context is present, and priority meets the threshold. Manual **POST `/alerts/manual`** uses the same pipeline. Pod dedup avoids duplicate CRs during active captures on the same pod.
-4. **postgres** stores alerts and forensic event state; a background sync updates phases from operator CR status.
+4. **postgres** stores alerts and forensic event state; a background sync updates phases from operator CR status into `raw_report.operator`.
+5. **POST `/forensic-checkpoint/{id}/analysis`** accepts checkpointctl reports (for a future DaemonSet analyzer) under `raw_report.checkpointctl` without overwriting operator status.
 
 ### Quickstart
 
@@ -95,7 +96,7 @@ Medusa supports two Falco deployments. Both post to **POST** `/alerts/falco`; pi
 | **Docker Compose** (lab) | `docker compose up` includes the `falco` service | Compose `target` container via Docker socket |
 | **Cluster** (Helm) | `scripts/falco-daemonset-setup.sh` | Pods in your Kubernetes cluster |
 
-Use **cluster Falco** for the full pipeline (`medusa`-tagged rules, k8s metadata in alerts, automatic forensic CRs on cluster pods). Use **compose Falco** for local lab demos — alerts are stored, but the lab `target` usually lacks `k8s.pod.name` so CRs are not created automatically.
+Use **cluster Falco** for the full pipeline (`medusa`-tagged rules, k8s metadata in alerts, automatic forensic CRs on cluster pods). Use **compose Falco** for local lab demos - alerts are stored, but the lab `target` usually lacks `k8s.pod.name` so CRs are not created automatically.
 
 When using cluster Falco, start only `api` and `postgres` from compose (omit the `falco` service). See [`docs/installation/falco.md`](docs/installation/falco.md) for install steps, env vars, and troubleshooting.
 
@@ -108,7 +109,7 @@ All compose services share the **`medusa-lab-net`** bridge network (`lab-net` in
 | target   | `target`   | `localhost:8080`   | `http://target:8080`     |
 | api      | `api`      | `localhost:8000`   | `http://api:8000`        |
 | postgres | `postgres` | `localhost:5432`   | `postgres:5432`          |
-| falco    | `falco`    | —                  | webhook → `http://api:8000/alerts/falco` |
+| falco    | `falco`    | -                  | webhook → `http://api:8000/alerts/falco` |
 
 The API connects to PostgreSQL at `postgres:5432` and mounts `${HOME}/.kube/config` for Kubernetes CR creation. Falco delivers alerts to the API over Docker DNS (`api:8000`), which requires the API to be on `lab-net` rather than `network_mode: host`.
 
@@ -128,7 +129,8 @@ curl -X POST http://localhost:8000/alerts/manual \
 | `GET` | `/alerts/` | List all persisted alerts |
 | `PUT` | `/alerts/{alert_id}` | Update an existing alert |
 | `POST` | `/alerts/manual` | Manually trigger a forensic checkpoint |
-| `GET` | `/forensic-checkpoint/{event_id}` | Retrieve a forensic event by ID |
+| `GET` | `/forensic-checkpoint/{event_id}` | Retrieve a forensic event by ID (includes `raw_report`) |
+| `POST` | `/forensic-checkpoint/{event_id}/analysis` | Attach checkpointctl analysis under `raw_report.checkpointctl` |
 | `GET` | `/health` | Health check |
 
 ### API documentation
@@ -141,7 +143,7 @@ FastAPI generates interactive and machine-readable API documentation automatical
 | ReDoc | `/redoc` | Read-only reference documentation |
 | OpenAPI specification | `/openapi.json` | Machine-readable OpenAPI 3 schema |
 
-See [`docs/api/overview.md`](docs/api/overview.md) for ingestion flows, webhook URLs (dev vs prod), pod dedup, idempotency semantics, and forensic event lifecycle details.
+See [`docs/api/overview.md`](docs/api/overview.md) for ingestion flows, webhook URLs (dev vs prod), pod dedup, idempotency, `raw_report` shape, analysis ingest, and forensic event lifecycle details.
 
 ### Tests
 
